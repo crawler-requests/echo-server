@@ -19,6 +19,7 @@ func TestClassifyIP_RealFunction(t *testing.T) {
 		{"192.168.1.1", "unknown"},
 		{"127.0.0.1", "unknown"},
 		{"203.0.113.5", "residential"},
+		{"198.51.100.7", "residential"},
 	}
 	for _, c := range cases {
 		got := classifyIP(c.ip)
