@@ -209,10 +209,12 @@ func TestRealHandler_SQLiteConfig(t *testing.T) {
 	SetConfig("show_ja3", "false")
 	SetConfig("show_ip", "true")
 	SetConfig("show_raw", "true")
+	SetConfig("show_body", "false")
 	defer func() {
 		SetConfig("show_ja3", "true")
 		SetConfig("show_ip", "true")
 		SetConfig("show_raw", "true")
+		SetConfig("show_body", "true")
 	}()
 
 	capturedHello = []byte{0x16, 0x03, 0x03, 0x00, 0x3b, 0x01, 0x00, 0x00, 0x37, 0x03, 0x03}
@@ -233,5 +235,8 @@ func TestRealHandler_SQLiteConfig(t *testing.T) {
 	}
 	if resp.IP == nil || resp.IP.IP == "" {
 		t.Errorf("IP info must still be present when show_ip=true")
+	}
+	if resp.Body != "" {
+		t.Errorf("Body should be hidden when show_body=false, got body=%q", resp.Body)
 	}
 }
