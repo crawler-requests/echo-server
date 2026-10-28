@@ -31,6 +31,24 @@ func TestClassifyIP_RealFunction(t *testing.T) {
 	}
 }
 
+// TestClassifyIP_Wrapper drives the SHIPPED classifyIP wrapper (the one echoHandler calls) on representative public IPs.
+func TestClassifyIP_Wrapper(t *testing.T) {
+	cases := []struct {
+		ip   string
+		want string
+	}{
+		{"8.8.8.8", "datacenter"},
+		{"203.0.113.5", "residential"},
+		{"192.168.1.1", "unknown"},
+	}
+	for _, c := range cases {
+		got := classifyIP(c.ip)
+		if got != c.want {
+			t.Errorf("classifyIP(%q) = %q, want %q", c.ip, got, c.want)
+		}
+	}
+}
+
 // TestFetchIPInfo_PublicIP drives the real fetchIPInfo on a representative public IP and asserts location + classification fields.
 func TestFetchIPInfo_PublicIP(t *testing.T) {
 	info := fetchIPInfo("8.8.8.8")
