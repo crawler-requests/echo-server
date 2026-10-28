@@ -201,3 +201,35 @@ func TestRealTLSHandler(t *testing.T) {
 		t.Errorf("raw JSON response must contain the literal keys cipher_suites, extensions, ja3_string, ja3_hash, connection_type")
 	}
 }
+
+// TestRealHandler_SQLiteConfig drives the shipped echoHandler and asserts that SQLite config toggles affect the JSON fields returned.
+func TestRealHandler_SQLiteConfig(t *testing.T) {
+	SetConfig("show_ja3", "false")
+	SetConfig("show_ip", "true")
+	SetConfig("show_raw", "true")
+	defer func() {
+		SetConfig("show_ja3", "true")
+		SetConfig("show_ip", "true")
+		SetConfig("show_raw", "true")
+	}()
+
+	capturedHello = []byte{0x16, 0x03, 0x03, 0x00, 0x3b, 0x01, 0x00, 0x00, 0x37, 0x03, 0x03}
+	defer func() { capturedHello = nil }()
+
+	req := httptest.NewRequest("GET", "/config-test", nil)
+	rr := httptest.NewRecorder()
+	echoHandler(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	var resp EchoResponse
+	json.Unmarshal(rr.Body.Bytes(), &resp)
+
+	if resp.TLS != nil && resp.TLS.JA3String != "" {
+		t.Errorf("JA3 should be hidden when show_ja3=false")
+	}
+	if resp.IP == nil || resp.IP.IP == "" {
+		t.Errorf("IP info must still be present when show_ip=true")
+	}
+}
