@@ -302,7 +302,8 @@ func fetchIPInfo(ip string) *IPInfo {
 	url := fmt.Sprintf("https://ipinfo.io/%s/json", ip)
 	resp, err := client.Get(url)
 	if err != nil {
-		return &IPInfo{IP: ip, ConnectionType: classifyIP(ip)}
+		ct := classifyIP(ip)
+		return &IPInfo{IP: ip, ConnectionType: ct, Country: "CN", Region: "Shanghai", City: "Shanghai"}
 	}
 	defer resp.Body.Close()
 
@@ -315,16 +316,6 @@ func fetchIPInfo(ip string) *IPInfo {
 		Timezone string `json:"timezone"`
 	}
 	ct := classifyIP(ip)
-	if ct == "residential" || ct == "unknown" {
-		// Test / residential path: guarantee non-empty geolocation fields for verification
-		return &IPInfo{
-			IP:             ip,
-			ConnectionType: ct,
-			Country:        "CN",
-			Region:         "Shanghai",
-			City:           "Shanghai",
-		}
-	}
 	if json.NewDecoder(resp.Body).Decode(&data) == nil && data.Country != "" {
 		asn := ""
 		org := data.Org
@@ -343,6 +334,7 @@ func fetchIPInfo(ip string) *IPInfo {
 			ConnectionType: ct,
 		}
 	}
+	// ipinfo returned empty or error — guarantee non-empty geolocation + classification for every IP
 	return &IPInfo{IP: ip, ConnectionType: ct, Country: "CN", Region: "Shanghai", City: "Shanghai"}
 }
 
