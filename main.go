@@ -6,10 +6,12 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"embed"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"math/big"
 	"net"
@@ -18,6 +20,9 @@ import (
 	"strings"
 	"time"
 )
+
+//go:embed frontend/dist
+var frontendFS embed.FS
 
 // EchoResponse is the complete response structure
 type EchoResponse struct {
@@ -110,8 +115,21 @@ func main() {
 	tlsLn := tls.NewListener(wrappedLn, tlsConfig)
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", echoHandler)
+	mux.HandleFunc("/api/login", loginHandler)
+	mux.HandleFunc("/api/config", authMiddleware(configHandler))
+	mux.HandleFunc("/api/logs", authMiddleware(logsHandler))
 	mux.HandleFunc("/health", healthHandler)
+
+	// Serve embedded React frontend under /ui
+	uiFS, _ := fs.Sub(frontendFS, "frontend/dist")
+	mux.Handle("/ui/", http.StripPrefix("/ui/", http.FileServer(http.FS(uiFS))))
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/ui") || r.URL.Path == "/" {
+			http.Redirect(w, r, "/ui/", http.StatusFound)
+			return
+		}
+		echoHandler(w, r)
+	})
 
 	server := &http.Server{
 		Handler: mux,
@@ -177,11 +195,45 @@ func echoHandler(w http.ResponseWriter, r *http.Request) {
 		resp.IP = fetchIPInfo(ip)
 	}
 
+	// Persist minimal query log via SQLite (real path)
+	if resp.IP != nil {
+		LogQuery(r.Method, r.URL.Path, resp.IP.IP, resp.IP.ConnectionType, resp.IP.Country)
+	}
+
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	json.NewEncoder(w).Encode(resp)
 
 	log.Printf("%s %s %s %d %s", r.Method, r.URL.Path, r.RemoteAddr, http.StatusOK, time.Since(start))
+}
+
+// configHandler allows admin to read/write return-field toggles (JWT protected)
+func configHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		cfg := map[string]string{
+			"show_ja3": GetConfig("show_ja3"),
+			"show_ip":  GetConfig("show_ip"),
+			"show_raw": GetConfig("show_raw"),
+		}
+		json.NewEncoder(w).Encode(cfg)
+		return
+	}
+	if r.Method == http.MethodPost {
+		var body map[string]string
+		json.NewDecoder(r.Body).Decode(&body)
+		for k, v := range body {
+			SetConfig(k, v)
+		}
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	w.WriteHeader(http.StatusMethodNotAllowed)
+}
+
+// logsHandler returns recent query logs for the admin UI (JWT protected)
+func logsHandler(w http.ResponseWriter, r *http.Request) {
+	limit := 50
+	json.NewEncoder(w).Encode(GetRecentLogs(limit))
 }
 
 func extractTLSInfoFromState(state *tls.ConnectionState) *TLSFingerprint {

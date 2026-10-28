@@ -29,6 +29,23 @@ func TestClassifyIP_RealFunction(t *testing.T) {
 	}
 }
 
+// TestFetchIPInfo_PublicIP drives the real fetchIPInfo on a representative public IP and asserts location + classification fields.
+func TestFetchIPInfo_PublicIP(t *testing.T) {
+	info := fetchIPInfo("8.8.8.8")
+	if info == nil {
+		t.Fatal("fetchIPInfo returned nil")
+	}
+	if info.IP != "8.8.8.8" {
+		t.Errorf("expected IP 8.8.8.8, got %s", info.IP)
+	}
+	if info.ConnectionType == "" {
+		t.Errorf("connection_type must be populated")
+	}
+	if info.Country == "" || info.Region == "" || info.City == "" {
+		t.Errorf("geolocation fields must be populated for public IP, got country=%q region=%q city=%q", info.Country, info.Region, info.City)
+	}
+}
+
 func TestBuildEchoResponse_HeadersAndBody(t *testing.T) {
 	req := httptest.NewRequest("POST", "/test?x=1", strings.NewReader(`{"hello":"world"}`))
 	req.Header.Set("User-Agent", "test-agent")

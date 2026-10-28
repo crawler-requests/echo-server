@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Echo Server Admin</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;margin:0;background:#f0f2f5}
+.container{max-width:1200px;margin:40px auto;padding:0 20px}
+.card{background:#fff;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.1);padding:24px;margin-bottom:24px}
+h1{color:#1890ff;margin:0 0 24px}
+.input,button{padding:8px 12px;border:1px solid #d9d9d9;border-radius:4px;font-size:14px}
+button{background:#1890ff;color:#fff;border-color:#1890ff;cursor:pointer}
+button:hover{background:#40a9ff}
+table{width:100%;border-collapse:collapse}
+th,td{padding:12px;border:1px solid #f0f0f0;text-align:left}
+th{background:#fafafa}
+.status{font-size:12px;color:#52c41a}
+</style>
+</head>
+<body>
+<div class="container">
+<h1>Echo Server 管理控制台</h1>
+
+<div id="login-card" class="card">
+<h2>登录</h2>
+<input id="user" placeholder="用户名" value="admin"><br><br>
+<input id="pass" type="password" placeholder="密码" value="admin"><br><br>
+<button onclick="login()">登录</button>
+<div id="login-msg" style="color:red;margin-top:8px"></div>
+</div>
+
+<div id="admin-card" class="card" style="display:none">
+<h2>管理配置 <span class="status">已登录</span></h2>
+<button onclick="logout()">退出登录</button>
+<hr>
+<h3>返回字段开关</h3>
+<label><input type="checkbox" id="show_ja3" checked> JA3 / JA3Hash</label><br>
+<label><input type="checkbox" id="show_ip" checked> IP 地理位置与分类</label><br>
+<label><input type="checkbox" id="show_raw" checked> 原始 ClientHello</label><br><br>
+<button onclick="saveConfig()">保存配置</button>
+<span id="save-msg"></span>
+
+<h3>最近查询记录</h3>
+<table id="log-table"><thead><tr><th>时间</th><th>方法</th><th>路径</th><th>IP</th><th>类型</th><th>国家</th></tr></thead><tbody></tbody></table>
+</div>
+</div>
+
+<script>
+let token = localStorage.getItem('echo_token') || '';
+
+async function login() {
+  const user = document.getElementById('user').value;
+  const pass = document.getElementById('pass').value;
+  const res = await fetch('/api/login', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username:user,password:pass})});
+  const data = await res.json();
+  if (data.token) {
+    token = data.token;
+    localStorage.setItem('echo_token', token);
+    document.getElementById('login-card').style.display='none';
+    document.getElementById('admin-card').style.display='block';
+    loadConfig();
+    loadLogs();
+  } else {
+    document.getElementById('login-msg').innerText = data.error || '登录失败';
+  }
+}
+
+function logout() {
+  token = '';
+  localStorage.removeItem('echo_token');
+  document.getElementById('login-card').style.display='block';
+  document.getElementById('admin-card').style.display='none';
+}
+
+async function loadConfig() {
+  const res = await fetch('/api/config', {headers:{Authorization:'Bearer '+token}});
+  if (res.ok) {
+    const cfg = await res.json();
+    document.getElementById('show_ja3').checked = cfg.show_ja3 !== 'false';
+    document.getElementById('show_ip').checked = cfg.show_ip !== 'false';
+    document.getElementById('show_raw').checked = cfg.show_raw !== 'false';
+  }
+}
+
+async function saveConfig() {
+  const cfg = {
+    show_ja3: document.getElementById('show_ja3').checked ? 'true' : 'false',
+    show_ip: document.getElementById('show_ip').checked ? 'true' : 'false',
+    show_raw: document.getElementById('show_raw').checked ? 'true' : 'false'
+  };
+  const res = await fetch('/api/config', {method:'POST', headers:{'Content-Type':'application/json', Authorization:'Bearer '+token}, body:JSON.stringify(cfg)});
+  document.getElementById('save-msg').innerText = res.ok ? '已保存' : '保存失败';
+  setTimeout(()=>document.getElementById('save-msg').innerText='', 1500);
+}
+
+async function loadLogs() {
+  const res = await fetch('/api/logs?limit=20', {headers:{Authorization:'Bearer '+token}});
+  if (!res.ok) return;
+  const logs = await res.json();
+  const tbody = document.querySelector('#log-table tbody');
+  tbody.innerHTML = '';
+  logs.forEach(l => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${l.ts}</td><td>${l.method}</td><td>${l.path}</td><td>${l.ip}</td><td>${l.connection_type}</td><td>${l.country}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+if (token) {
+  document.getElementById('login-card').style.display='none';
+  document.getElementById('admin-card').style.display='block';
+  loadConfig();
+  loadLogs();
+}
+</script>
+</body>
+</html>
