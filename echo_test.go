@@ -9,6 +9,25 @@ import (
 	"testing"
 )
 
+func TestClassifyIP_RealFunction(t *testing.T) {
+	cases := []struct {
+		ip   string
+		want string
+	}{
+		{"8.8.8.8", "datacenter"},
+		{"1.1.1.1", "datacenter"},
+		{"192.168.1.1", "unknown"},
+		{"127.0.0.1", "unknown"},
+		{"203.0.113.5", "residential"},
+	}
+	for _, c := range cases {
+		got := classifyIP(c.ip)
+		if got != c.want {
+			t.Errorf("classifyIP(%q) = %q, want %q", c.ip, got, c.want)
+		}
+	}
+}
+
 func TestBuildEchoResponse_HeadersAndBody(t *testing.T) {
 	req := httptest.NewRequest("POST", "/test?x=1", strings.NewReader(`{"hello":"world"}`))
 	req.Header.Set("User-Agent", "test-agent")
@@ -154,10 +173,13 @@ func TestRealTLSHandler(t *testing.T) {
 	if resp.IP == nil || resp.IP.IP == "" {
 		t.Errorf("ip must be present in JSON response")
 	}
+	if resp.IP.ConnectionType == "" {
+		t.Errorf("ip.connection_type must be present and non-empty in JSON response")
+	}
 
 	// Also assert the raw JSON body literally contains the keys the skeptic flagged
 	raw := string(bodyBytes)
-	if !strings.Contains(raw, "cipher_suites") || !strings.Contains(raw, "extensions") || !strings.Contains(raw, "ja3_string") || !strings.Contains(raw, "ja3_hash") {
-		t.Errorf("raw JSON response must contain the literal keys cipher_suites, extensions, ja3_string, ja3_hash")
+	if !strings.Contains(raw, "cipher_suites") || !strings.Contains(raw, "extensions") || !strings.Contains(raw, "ja3_string") || !strings.Contains(raw, "ja3_hash") || !strings.Contains(raw, "connection_type") {
+		t.Errorf("raw JSON response must contain the literal keys cipher_suites, extensions, ja3_string, ja3_hash, connection_type")
 	}
 }

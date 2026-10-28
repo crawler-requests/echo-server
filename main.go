@@ -56,15 +56,16 @@ type TLSFingerprint struct {
 	CipherSuite string `json:"cipher_suite"`
 }
 
-// IPInfo contains public IP, ASN, geolocation
+// IPInfo contains public IP, ASN, geolocation and connection classification
 type IPInfo struct {
-	IP          string `json:"ip"`
-	ASN         string `json:"asn,omitempty"`
-	Org         string `json:"org,omitempty"`
-	Country     string `json:"country,omitempty"`
-	Region      string `json:"region,omitempty"`
-	City        string `json:"city,omitempty"`
-	Timezone    string `json:"timezone,omitempty"`
+	IP             string `json:"ip"`
+	ASN            string `json:"asn,omitempty"`
+	Org            string `json:"org,omitempty"`
+	Country        string `json:"country,omitempty"`
+	Region         string `json:"region,omitempty"`
+	City           string `json:"city,omitempty"`
+	Timezone       string `json:"timezone,omitempty"`
+	ConnectionType string `json:"connection_type,omitempty"` // datacenter | residential | proxy | unknown
 }
 
 var (
@@ -227,14 +228,14 @@ func getClientIP(r *http.Request) string {
 // fetchIPInfo calls a free IP info service (best effort, no key required)
 func fetchIPInfo(ip string) *IPInfo {
 	if ip == "" || strings.HasPrefix(ip, "127.") || strings.HasPrefix(ip, "::1") {
-		return &IPInfo{IP: ip}
+		return &IPInfo{IP: ip, ConnectionType: classifyIP(ip)}
 	}
 
 	client := &http.Client{Timeout: 2 * time.Second}
 	url := fmt.Sprintf("https://ipinfo.io/%s/json", ip)
 	resp, err := client.Get(url)
 	if err != nil {
-		return &IPInfo{IP: ip}
+		return &IPInfo{IP: ip, ConnectionType: classifyIP(ip)}
 	}
 	defer resp.Body.Close()
 
@@ -254,16 +255,17 @@ func fetchIPInfo(ip string) *IPInfo {
 			org = org[idx+1:]
 		}
 		return &IPInfo{
-			IP:       data.IP,
-			ASN:      asn,
-			Org:      org,
-			Country:  data.Country,
-			Region:   data.Region,
-			City:     data.City,
-			Timezone: data.Timezone,
+			IP:             data.IP,
+			ASN:            asn,
+			Org:            org,
+			Country:        data.Country,
+			Region:         data.Region,
+			City:           data.City,
+			Timezone:       data.Timezone,
+			ConnectionType: classifyIP(data.IP),
 		}
 	}
-	return &IPInfo{IP: ip}
+	return &IPInfo{IP: ip, ConnectionType: classifyIP(ip)}
 }
 
 // generateSelfSignedCert creates an in-memory self-signed certificate for the server
