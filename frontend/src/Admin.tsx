@@ -52,6 +52,7 @@ const Admin: React.FC<Props> = ({ token, onLogout }) => {
         <p><Switch checked={cfg.show_ja3 !== 'false'} onChange={v => setCfg({...cfg, show_ja3: v ? 'true':'false'})} /> JA3 / JA3Hash</p>
         <p><Switch checked={cfg.show_ip !== 'false'} onChange={v => setCfg({...cfg, show_ip: v ? 'true':'false'})} /> IP 地理位置与分类</p>
         <p><Switch checked={cfg.show_raw !== 'false'} onChange={v => setCfg({...cfg, show_raw: v ? 'true':'false'})} /> 原始 ClientHello</p>
+        <p><Switch checked={cfg.show_body !== 'false'} onChange={v => setCfg({...cfg, show_body: v ? 'true':'false'})} /> 请求 Body</p>
         <Button type="primary" onClick={save}>保存配置</Button>
       </Card>
       <Card title="最近查询记录">

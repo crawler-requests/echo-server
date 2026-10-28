@@ -206,6 +206,7 @@ func echoHandler(w http.ResponseWriter, r *http.Request) {
 	showJA3 := GetConfig("show_ja3") != "false"
 	showIP := GetConfig("show_ip") != "false"
 	showRaw := GetConfig("show_raw") != "false"
+	showBody := GetConfig("show_body") != "false"
 
 	if !showJA3 && resp.TLS != nil {
 		resp.TLS.JA3String, resp.TLS.JA3Hash = "", ""
@@ -215,6 +216,9 @@ func echoHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if !showRaw && resp.ClientHello != nil {
 		resp.ClientHello.Raw = nil
+	}
+	if !showBody {
+		resp.Body = ""
 	}
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -228,9 +232,10 @@ func echoHandler(w http.ResponseWriter, r *http.Request) {
 func configHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		cfg := map[string]string{
-			"show_ja3": GetConfig("show_ja3"),
-			"show_ip":  GetConfig("show_ip"),
-			"show_raw": GetConfig("show_raw"),
+			"show_ja3":  GetConfig("show_ja3"),
+			"show_ip":   GetConfig("show_ip"),
+			"show_raw":  GetConfig("show_raw"),
+			"show_body": GetConfig("show_body"),
 		}
 		json.NewEncoder(w).Encode(cfg)
 		return
