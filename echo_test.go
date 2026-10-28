@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/crawler-requests/echo-server/ipclass"
 )
 
 func TestClassifyIP_RealFunction(t *testing.T) {
@@ -22,9 +24,9 @@ func TestClassifyIP_RealFunction(t *testing.T) {
 		{"198.51.100.7", "residential"},
 	}
 	for _, c := range cases {
-		got := classifyIP(c.ip)
+		got := ipclass.Classify(c.ip)
 		if got != c.want {
-			t.Errorf("classifyIP(%q) = %q, want %q", c.ip, got, c.want)
+			t.Errorf("ipclass.Classify(%q) = %q, want %q", c.ip, got, c.want)
 		}
 	}
 }
