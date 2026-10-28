@@ -123,8 +123,10 @@ func main() {
 	// Serve embedded React frontend under /ui
 	uiFS, _ := fs.Sub(frontendFS, "frontend/dist")
 	mux.Handle("/ui/", http.StripPrefix("/ui/", http.FileServer(http.FS(uiFS))))
+
+	// Root handler: SPA redirect for / and /ui*, echo handler otherwise (JWT/API token optional)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/ui") || r.URL.Path == "/" {
+		if r.URL.Path == "/" || strings.HasPrefix(r.URL.Path, "/ui") {
 			http.Redirect(w, r, "/ui/", http.StatusFound)
 			return
 		}
