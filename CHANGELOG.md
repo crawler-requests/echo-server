@@ -28,7 +28,7 @@ First public release. One self-contained Go binary with the React console embedd
 - **IP intelligence** — offline CIDR/org classification, plus an ordered `builtin` / `http` /
   `command` lookup chain (ipwho.is → ip-api.com → ipinfo.io), field mapping, per-provider stats and
   a chain-test endpoint.
-- **Admin console** (`/ui/`) — React + Ant Design, 17 pages: overview, echo settings, IP intel,
+- **Admin console** (`/ui/`) — React + Ant Design, 18 pages: overview, echo settings, IP intel,
   data sources, lookup chain, JA4 library, monitoring, query logs, audit trail, notifications,
   users, access control, security, integrations/webhooks, system settings, API docs and a toolbox.
 - **Account system** — first-run setup wizard, JWT sessions, `admin`/`viewer` roles, PBKDF2-SHA256
