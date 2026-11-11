@@ -1,0 +1,55 @@
+name: Bug report
+description: Something behaves incorrectly or crashes
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. **Do not include secrets** (tokens, passwords, API keys, database
+        backups). Security issues go to the private advisory link in `SECURITY.md`, not here.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `GET /api/system` → `version`, or the release tag / commit.
+      placeholder: v1.0.0
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: Installation
+      options:
+        - Release binary
+        - Docker image
+        - Built from source (make build)
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: Exact requests/commands, configuration keys, and environment variables. Redact secrets.
+      render: bash
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Server logs and browser console output. Redact tokens and IPs if needed.
+      render: text
+  - type: input
+    id: os
+    attributes:
+      label: OS / architecture
+      placeholder: Ubuntu 24.04 amd64
