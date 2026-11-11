@@ -1,0 +1,76 @@
+# GoReleaser configuration for the single-binary Echo Server release.
+# The React console is compiled first and embedded via //go:embed frontend/dist,
+# so every archive contains one self-contained executable.
+version: 2
+
+project_name: echo-server
+
+before:
+  hooks:
+    - npm --prefix frontend ci --no-audit --no-fund
+    - npm --prefix frontend run build
+
+builds:
+  - id: echo-server
+    main: .
+    binary: echo-server
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.serverVersion={{ .Version }}
+      - -X main.buildCommit={{ .FullCommit }}
+      - -X main.buildDate={{ .CommitDate }}
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: default
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    files:
+      - README.md
+      - README.zh-CN.md
+      - DESIGN.md
+      - CHANGELOG.md
+      - LICENSE
+      - SECURITY.md
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - "^chore:"
+      - "^style:"
+      - Merge pull request
+      - Merge branch
+
+release:
+  draft: false
+  prerelease: auto
+  footer: |
+    **运行方式**：下载对应平台压缩包，解压后直接执行 `./echo-server`。
+    控制台默认在 `http://<host>:8080/ui/`，HTTPS 回显与 TLS 指纹在 `https://<host>:8443/`。

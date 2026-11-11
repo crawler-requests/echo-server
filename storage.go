@@ -20,10 +20,18 @@ var (
 func initDB() error {
 	var err error
 	dbOnce.Do(func() {
-		home, _ := os.UserHomeDir()
-		dir := filepath.Join(home, ".echo-server")
-		_ = os.MkdirAll(dir, 0700)
-		dbPath = filepath.Join(dir, "echo.db")
+		// ECHO_SERVER_DB lets tests (and side-by-side deployments) point at an
+		// isolated database instead of the user's ~/.echo-server/echo.db.
+		dbPath = os.Getenv("ECHO_SERVER_DB")
+		if dbPath == "" {
+			home, _ := os.UserHomeDir()
+			dir := filepath.Join(home, ".echo-server")
+			_ = os.MkdirAll(dir, 0700)
+			dbPath = filepath.Join(dir, "echo.db")
+		}
+		if dir := filepath.Dir(dbPath); dir != "" {
+			_ = os.MkdirAll(dir, 0700)
+		}
 		db, err = sql.Open("sqlite", dbPath)
 		if err != nil {
 			return
@@ -43,6 +51,19 @@ func initDB() error {
 			ip TEXT,
 			connection_type TEXT,
 			country TEXT
+		);`)
+		if err != nil {
+			return
+		}
+		_, err = db.Exec(`CREATE TABLE IF NOT EXISTS users (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			username TEXT NOT NULL UNIQUE,
+			password_hash TEXT NOT NULL,
+			role TEXT NOT NULL DEFAULT 'viewer',
+			disabled INTEGER NOT NULL DEFAULT 0,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			last_login TEXT NOT NULL DEFAULT ''
 		);`)
 	})
 	return err
@@ -68,6 +89,25 @@ func LogQuery(method, path, ip, connType, country string) {
 	initDB()
 	_, _ = db.Exec(`INSERT INTO query_log(ts, method, path, ip, connection_type, country) VALUES(?,?,?,?,?,?)`,
 		time.Now().UTC().Format(time.RFC3339), method, path, ip, connType, country)
+}
+
+// QueryStats is the small aggregate shown on the console dashboard.
+type QueryStats struct {
+	Users        int `json:"users"`
+	QueriesTotal int `json:"queries_total"`
+	QueriesToday int `json:"queries_today"`
+}
+
+// GetStats returns account and query-log totals. Counting in SQLite keeps the
+// dashboard cheap even when the log table has grown large.
+func GetStats() QueryStats {
+	initDB()
+	var s QueryStats
+	_ = db.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&s.Users)
+	_ = db.QueryRow(`SELECT COUNT(*) FROM query_log`).Scan(&s.QueriesTotal)
+	today := time.Now().UTC().Format("2006-01-02") + "T00:00:00Z"
+	_ = db.QueryRow(`SELECT COUNT(*) FROM query_log WHERE ts >= ?`, today).Scan(&s.QueriesToday)
+	return s
 }
 
 // GetRecentLogs returns the last N query records (for admin UI)

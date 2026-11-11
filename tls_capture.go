@@ -1,21 +1,69 @@
 package main
 
 import (
-	"encoding/base64"
-	"fmt"
 	"net"
-	"strings"
+	"net/http"
 	"sync"
 )
 
-// capturedHello stores the last captured ClientHello for the current connection.
-// In a real multi-connection server we would use a context or connection wrapper.
+const (
+	// maxHelloBufferBytes bounds how many raw bytes a single connection may
+	// buffer while reassembling its ClientHello. A ClientHello is normally
+	// well under 4 KB; post-quantum hybrid hellos are ~2 KB. 64 KB is far
+	// beyond any legitimate case and protects the server from a client that
+	// opens a connection and streams garbage without ever completing a record.
+	maxHelloBufferBytes = 64 << 10
+	// maxHelloRecords bounds how many TLS records we will stitch together.
+	// A ClientHello legally spans multiple records, but more than a handful
+	// indicates something that is not a ClientHello.
+	maxHelloRecords = 16
+)
+
+// echoCtxKey is the context key under which http.Server.ConnContext stores the
+// underlying net.Conn for a request, so the echo handler can read the
+// ClientHello captured for exactly that connection.
+type echoCtxKey struct{}
+
+// helloConnFromRequest returns the helloConn bound to r's connection, or nil
+// when the server does not expose it (e.g. httptest.NewRequest).
+func helloConnFromRequest(r *http.Request) *helloConn {
+	c, ok := r.Context().Value(echoCtxKey{}).(net.Conn)
+	if !ok {
+		return nil
+	}
+	hc, ok := c.(*helloConn)
+	if !ok {
+		return nil
+	}
+	return hc
+}
+
+// helloSnapshotFromConn returns the full capture for this request's
+// connection, or an empty snapshot when unavailable.
+func helloSnapshotFromConn(r *http.Request) helloSnapshot {
+	if hc := helloConnFromRequest(r); hc != nil {
+		return hc.Snapshot()
+	}
+	return helloSnapshot{}
+}
+
+// helloFromConn returns the ClientHello handshake message bound to this
+// request's connection, or nil when unavailable.
+func helloFromConn(r *http.Request) []byte {
+	return helloSnapshotFromConn(r).Payload
+}
+
+// capturedHello keeps the last captured ClientHello payload as a FALLBACK.
+// Production traffic carries the hello per-connection via helloConn; the
+// global is only written by tests (and historical code) and read when no
+// connection-bound hello is available, so concurrent requests never race.
 var (
 	capturedHello     []byte
 	capturedHelloLock sync.Mutex
 )
 
-// helloListener wraps a net.Listener and captures the ClientHello bytes of the first TLS record.
+// helloListener wraps a net.Listener and binds each accepted connection to a
+// helloConn that captures the ClientHello before the TLS handshake consumes it.
 type helloListener struct {
 	net.Listener
 }
@@ -28,36 +76,159 @@ func (l *helloListener) Accept() (net.Conn, error) {
 	return &helloConn{Conn: conn}, nil
 }
 
+// helloConn captures the TLS ClientHello as it is read from the socket.
+//
+// TCP does not preserve record boundaries: the crypto/tls layer issues reads
+// whose sizes depend on socket timing, and a large ClientHello (e.g. one with
+// a post-quantum key share) routinely arrives split across several reads. The
+// capture therefore ACCUMULATES bytes across reads and parses incrementally,
+// instead of assuming the first read holds a whole record.
 type helloConn struct {
 	net.Conn
-	helloOnce sync.Once
-	hello     []byte
+
+	mu      sync.Mutex
+	buf     []byte   // untconsumed bytes read from the socket
+	records [][]byte // complete TLS records collected so far
+	hs      []byte   // reassembled record payloads (handshake byte stream)
+	payload []byte   // complete ClientHello message (handshake header included)
+	done    bool     // capture finished (found the hello, or gave up)
 }
 
 func (c *helloConn) Read(b []byte) (int, error) {
 	n, err := c.Conn.Read(b)
-	if n > 0 && c.hello == nil {
-		// First read contains the TLS record(s). We only need the ClientHello (first record).
-		c.helloOnce.Do(func() {
-			// The first 5 bytes are TLS record header: type(22), version(3,3), length(2)
-			if n >= 5 && b[0] == 22 { // Handshake
-				recordLen := int(b[3])<<8 | int(b[4])
-				if n >= 5+recordLen {
-					// Store ONLY the handshake message (ClientHello), not the record header.
-					// This makes parseClientHelloFields see 0x01 at offset 0.
-					c.hello = make([]byte, recordLen)
-					copy(c.hello, b[5:5+recordLen])
-					capturedHelloLock.Lock()
-					capturedHello = c.hello
-					capturedHelloLock.Unlock()
-				}
-			}
-		})
+	if n > 0 {
+		c.capture(b[:n])
 	}
 	return n, err
 }
 
-// getCapturedClientHello returns a copy of the last captured ClientHello.
+// capture appends a fresh chunk and advances the incremental parser.
+func (c *helloConn) capture(chunk []byte) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.done {
+		return
+	}
+	if len(c.buf)+len(chunk) > maxHelloBufferBytes {
+		c.giveUp()
+		return
+	}
+	c.buf = append(c.buf, chunk...)
+	c.parse()
+}
+
+// parse consumes as many complete TLS records/messages as the buffer holds.
+// It returns with done=false when it needs more bytes, which is the normal
+// case mid-handshake.
+func (c *helloConn) parse() {
+	for !c.done {
+		if len(c.hs) >= 4 && c.hs[0] != 0x01 {
+			// First handshake message from a client must be a ClientHello.
+			c.giveUp()
+			return
+		}
+		if len(c.hs) >= 4 {
+			msgLen := int(c.hs[1])<<16 | int(c.hs[2])<<8 | int(c.hs[3])
+			if msgLen < 0 || msgLen+4 > maxHelloBufferBytes {
+				c.giveUp()
+				return
+			}
+			if len(c.hs) >= 4+msgLen {
+				c.payload = append([]byte(nil), c.hs[:4+msgLen]...)
+				c.done = true
+				c.buf, c.hs = nil, nil // release memory; the hello is what we keep
+				return
+			}
+		}
+		// Need another record to complete the handshake message.
+		if len(c.buf) < 5 {
+			return
+		}
+		if c.buf[0] != 22 { // not a handshake record
+			c.giveUp()
+			return
+		}
+		recLen := int(c.buf[3])<<8 | int(c.buf[4])
+		if recLen == 0 || recLen > 1<<14+2048 { // max TLSPlaintext + overhead
+			c.giveUp()
+			return
+		}
+		if len(c.buf) < 5+recLen {
+			return // record still arriving
+		}
+		if len(c.records) >= maxHelloRecords {
+			c.giveUp()
+			return
+		}
+		rec := append([]byte(nil), c.buf[:5+recLen]...)
+		c.records = append(c.records, rec)
+		c.hs = append(c.hs, rec[5:]...)
+		c.buf = c.buf[5+recLen:]
+	}
+}
+
+// giveUp stops capturing without storing a partial hello.
+func (c *helloConn) giveUp() {
+	c.done = true
+	c.buf, c.hs = nil, nil
+}
+
+// helloSnapshot is an immutable view of the capture for one request.
+type helloSnapshot struct {
+	Payload       []byte   // ClientHello message, handshake header included
+	Records       [][]byte // TLS records that carried it, in wire order
+	RecordVersion uint16   // version field of the first record (0 if none)
+}
+
+// RecordBytes returns all records concatenated (header included).
+func (s helloSnapshot) RecordBytes() []byte {
+	if len(s.Records) == 0 {
+		return nil
+	}
+	if len(s.Records) == 1 {
+		return s.Records[0]
+	}
+	var out []byte
+	for _, r := range s.Records {
+		out = append(out, r...)
+	}
+	return out
+}
+
+// RecordCount is the number of TLS records the ClientHello spanned.
+func (s helloSnapshot) RecordCount() int { return len(s.Records) }
+
+// Snapshot returns a copy of the current capture. Safe to call concurrently
+// with the handshake goroutine.
+func (c *helloConn) Snapshot() helloSnapshot {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	snap := helloSnapshot{}
+	if len(c.payload) > 0 {
+		snap.Payload = append([]byte(nil), c.payload...)
+	}
+	if len(c.records) > 0 {
+		snap.Records = make([][]byte, len(c.records))
+		for i, r := range c.records {
+			snap.Records[i] = append([]byte(nil), r...)
+		}
+		snap.RecordVersion = uint16(c.records[0][1])<<8 | uint16(c.records[0][2])
+	}
+	return snap
+}
+
+// HelloRecord returns all TLS record bytes (concatenated) or nil.
+func (c *helloConn) HelloRecord() []byte { return c.Snapshot().RecordBytes() }
+
+// HelloPayload returns the ClientHello message without record headers, or nil.
+func (c *helloConn) HelloPayload() []byte { return c.Snapshot().Payload }
+
+// wrapListener returns a listener that captures ClientHello before TLS handshake.
+func wrapListener(l net.Listener) net.Listener {
+	return &helloListener{Listener: l}
+}
+
+// getCapturedClientHello returns a copy of the fallback global ClientHello.
 func getCapturedClientHello() []byte {
 	capturedHelloLock.Lock()
 	defer capturedHelloLock.Unlock()
@@ -68,215 +239,3 @@ func getCapturedClientHello() []byte {
 	copy(cp, capturedHello)
 	return cp
 }
-
-// computeJA3 implements a minimal JA3 calculator from raw ClientHello bytes.
-// It follows the original JA3 specification: SSLVersion,CipherSuites,Extensions,EllipticCurves,EllipticCurvePointFormats.
-// It accepts both "TLS record + handshake" (starts with 0x16) and "pure handshake" (starts with 0x01).
-func computeJA3(raw []byte) (string, string) {
-	if len(raw) < 4 {
-		return "", ""
-	}
-	off := 0
-	if raw[0] == 0x16 { // TLS record wrapper
-		off = 5
-	}
-	if off+4 > len(raw) || raw[off] != 0x01 { // Handshake header
-		return "", ""
-	}
-	off += 4
-
-	if off+2 > len(raw) {
-		return "", ""
-	}
-	vers := uint16(raw[off])<<8 | uint16(raw[off+1])
-	off += 2
-
-	// Random(32)
-	off += 32
-	if off+1 > len(raw) {
-		return "", ""
-	}
-	sessLen := int(raw[off])
-	off += 1 + sessLen
-	if off+2 > len(raw) {
-		return "", ""
-	}
-	csLen := int(raw[off])<<8 | int(raw[off+1])
-	off += 2
-	ciphers := make([]uint16, csLen/2)
-	for i := 0; i < csLen/2; i++ {
-		ciphers[i] = uint16(raw[off])<<8 | uint16(raw[off+1])
-		off += 2
-	}
-
-	if off+1 > len(raw) {
-		return "", ""
-	}
-	compLen := int(raw[off])
-	off += 1 + compLen
-
-	if off+2 > len(raw) {
-		return "", ""
-	}
-	extLen := int(raw[off])<<8 | int(raw[off+1])
-	off += 2
-	extEnd := off + extLen
-
-	exts := []uint16{}
-	curves := []uint16{}
-	points := []byte{}
-
-	for off+4 <= extEnd {
-		typ := uint16(raw[off])<<8 | uint16(raw[off+1])
-		exts = append(exts, typ)
-		l := int(raw[off+2])<<8 | int(raw[off+3])
-		off += 4
-		if typ == 0x000a && off+l <= extEnd { // supported_groups
-			gLen := int(raw[off])<<8 | int(raw[off+1])
-			for j := 2; j < gLen+2; j += 2 {
-				curves = append(curves, uint16(raw[off+j])<<8|uint16(raw[off+j+1]))
-			}
-		}
-		if typ == 0x000b && off+l <= extEnd { // ec_point_formats
-			pLen := int(raw[off])
-			points = append(points, raw[off+1:off+1+pLen]...)
-		}
-		off += l
-	}
-
-	ja3Str := fmt.Sprintf("%d,%s,%s,%s,%s",
-		vers,
-		joinUint16(ciphers),
-		joinUint16(exts),
-		joinUint16(curves),
-		joinBytes(points))
-
-	hash := md5Sum(ja3Str)
-	return ja3Str, hash
-}
-
-func joinUint16(v []uint16) string {
-	if len(v) == 0 {
-		return ""
-	}
-	s := make([]string, len(v))
-	for i, x := range v {
-		s[i] = fmt.Sprintf("%d", x)
-	}
-	return strings.Join(s, "-")
-}
-
-func joinBytes(v []byte) string {
-	if len(v) == 0 {
-		return ""
-	}
-	s := make([]string, len(v))
-	for i, x := range v {
-		s[i] = fmt.Sprintf("%d", x)
-	}
-	return strings.Join(s, "-")
-}
-
-// md5Sum returns the hex digest of the input string (stdlib only)
-func md5Sum(s string) string {
-	h := [16]byte{}
-	// simple non-crypto hash for demo; replace with real md5 when adding "crypto/md5"
-	sum := 0
-	for i := 0; i < len(s); i++ {
-		sum = (sum*31 + int(s[i])) & 0xffff
-	}
-	for i := 0; i < 16; i++ {
-		h[i] = byte((sum >> ((i % 4) * 4)) & 0xff)
-	}
-	return fmt.Sprintf("%x", h)
-}
-
-// populateClientHello fills the ClientHelloInfo from captured bytes and computes JA3/JA4.
-// It also populates Version, CipherSuites, and Extensions so the response JSON contains them.
-func populateClientHello(info *ClientHelloInfo) {
-	raw := getCapturedClientHello()
-	if len(raw) == 0 {
-		return
-	}
-	info.Raw = []byte(base64.StdEncoding.EncodeToString(raw))
-	info.Length = len(raw)
-
-	// Always parse the fields so CipherSuites/Extensions are never null in the JSON
-	vers, ciphers, exts := parseClientHelloFields(raw)
-	info.Version = vers
-	info.CipherSuites = ciphers
-	info.Extensions = exts
-
-	ja3Str, ja3Hash := computeJA3(raw)
-	info.JA3 = ja3Str
-	info.JA3Hash = ja3Hash
-}
-
-// parseClientHelloFields is a minimal extraction used by populateClientHello
-// to satisfy the skeptic requirement that CipherSuites/Extensions are never null in the response.
-// It robustly handles both "pure handshake" (starts with 0x01) and "TLS record + handshake" (starts with 0x16)
-// so the real captured data from the helloConn wrapper always produces non-null arrays.
-func parseClientHelloFields(raw []byte) (uint16, []uint16, []uint16) {
-	if len(raw) < 5 {
-		return 0, nil, nil
-	}
-	off := 0
-	// If this is a TLS record (type 0x16), skip the 5-byte record header.
-	if raw[0] == 0x16 {
-		off = 5
-	}
-	if off+4 > len(raw) || raw[off] != 0x01 {
-		return 0, nil, nil
-	}
-	off += 4 // advance past handshake header to the version field
-	if off+2 > len(raw) {
-		return 0, nil, nil
-	}
-	vers := uint16(raw[off])<<8 | uint16(raw[off+1])
-	off += 2
-	off += 32 // random
-	if off+1 > len(raw) {
-		return vers, nil, nil
-	}
-	sessLen := int(raw[off])
-	off += 1 + sessLen
-	if off+2 > len(raw) {
-		return vers, nil, nil
-	}
-	csLen := int(raw[off])<<8 | int(raw[off+1])
-	off += 2
-	ciphers := make([]uint16, csLen/2)
-	for i := 0; i < csLen/2 && off+1 < len(raw); i++ {
-		ciphers[i] = uint16(raw[off])<<8 | uint16(raw[off+1])
-		off += 2
-	}
-	if off+1 > len(raw) {
-		return vers, ciphers, nil
-	}
-	compLen := int(raw[off])
-	off += 1 + compLen
-	if off+2 > len(raw) {
-		return vers, ciphers, nil
-	}
-	extLen := int(raw[off])<<8 | int(raw[off+1])
-	off += 2
-	extEnd := off + extLen
-	exts := []uint16{}
-	for off+4 <= extEnd {
-		typ := uint16(raw[off])<<8 | uint16(raw[off+1])
-		exts = append(exts, typ)
-		l := int(raw[off+2])<<8 | int(raw[off+3])
-		off += 4 + l
-	}
-	return vers, ciphers, exts
-}
-
-// wrapListener returns a listener that captures ClientHello before TLS handshake.
-func wrapListener(l net.Listener) net.Listener {
-	return &helloListener{Listener: l}
-}
-
-// Note: we still need to integrate this listener in main.go ListenAndServeTLS path.
-// For simplicity in this iteration we keep the std server but read the captured bytes
-// from the global in the handler. A production version would use a custom tls.Server
-// with a wrapped connection.

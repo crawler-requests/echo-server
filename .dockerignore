@@ -1,0 +1,11 @@
+.git
+.github
+dist
+frontend/node_modules
+frontend/dist
+echo-server
+echo-server.log
+*.db
+*.db-journal
+server-url.txt
+README.zh-CN.md

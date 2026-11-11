@@ -1,0 +1,41 @@
+name: Feature request
+description: Suggest a new capability or an improvement
+title: "feat: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For large changes, describe the use case first — it is easier to agree on the problem than
+        on an implementation.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What can't you do today, or what is unnecessarily hard?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: API shape, config keys, UI placement, or a sketch.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      multiple: true
+      options:
+        - Echo endpoint / TLS fingerprints
+        - Client identification
+        - Data sources / JA4 library
+        - IP intelligence
+        - Admin console
+        - Auth / security
+        - Observability / operations
+        - Packaging / deployment
+        - Documentation
