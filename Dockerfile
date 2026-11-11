@@ -3,7 +3,7 @@
 # Build the console first, then embed it into a static Go binary (CGO disabled),
 # so the runtime image carries only the executable, CA roots and tzdata.
 
-FROM node:22-alpine AS ui
+FROM node:25-alpine AS ui
 WORKDIR /src/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci --no-audit --no-fund
