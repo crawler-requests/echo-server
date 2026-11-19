@@ -27,8 +27,8 @@ is designed so a release is a repeatable 15-minute operation.
    git push origin v1.0.0
 
    # lite build (no database; /ip and /echo only) — separate tag namespace
-   git tag -a lite-v1.0.0 -m "lite-v1.0.0"
-   git push origin lite-v1.0.0
+   git tag -a lite-1.0.0 -m "lite-1.0.0"
+   git push origin lite-1.0.0
    ```
 4. **Watch the release workflow**
    ```bash

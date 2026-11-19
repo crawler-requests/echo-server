@@ -61,7 +61,7 @@ Webhook、日志筛选视图、Prometheus 指标与 OpenAPI 文档。
 部署 echo-server 极速版，它是一个无状态的"我的出网 IP 是什么"端点。
 
 步骤：
-1. 下载极速版 release：tag 前缀 `lite-v`，产物
+1. 下载极速版 release：tag 前缀 `lite-`，产物
    echo-server-lite_<version>_<os>_<arch>.tar.gz，校验 checksums 后解压。
 2. 完全不使用数据库启动：
      ECHO_SERVER_LITE=1 PORT=8443 HTTP_PORT=8080 ./echo-server-lite
@@ -791,7 +791,7 @@ make release-snapshot    # 本地生成 dist/ 压缩包 + 校验和（不发布�
 发布流程（完整清单见 [RELEASING.md](RELEASING.md)）：
 
 1. `git tag v1.0.0 && git push origin v1.0.0` —— 发布**完整产品**。
-2. `git tag lite-v1.0.0 && git push origin lite-v1.0.0` —— 发布**极速版**，作为独立 release 单独
+2. `git tag lite-1.0.0 && git push origin lite-1.0.0` —— 发布**极速版**，作为独立 release 单独
    打 tag、单独出产物（`echo-server-lite_*`），两者永不混淆。
 3. `.github/workflows/release.yml` 运行测试、对构建出的二进制做实时冒烟测试（`/ip`、`/echo`、控制台
    页面与 `/api/login`），然后跑 GoReleaser；其 `before` 钩子构建 `frontend/dist`。

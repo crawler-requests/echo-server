@@ -3,7 +3,7 @@
 # The lite binary is the same source tree started with ECHO_SERVER_LITE=1: no
 # SQLite, no users, no datasets, no admin API, no query log. It answers /ip and
 # /echo only, which is what a proxy pool or a high-concurrency egress check
-# needs. It is published as a SEPARATE release (tag `lite-v*`) with its own
+# needs. It is published as a SEPARATE release (tag `lite-*`) with its own
 # archives so nobody confuses it with the full product.
 version: 2
 
