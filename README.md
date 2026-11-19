@@ -60,7 +60,7 @@ Report: what you ran, every test output, and the URL. If any check fails, fix it
 Deploy the echo-server LITE build, which is a stateless "what is my egress IP" endpoint.
 
 Steps:
-1. Download the lite release: tag prefix `lite-`, artifact
+1. Download the lite release: plain semver tags (`1.x.y`, no `v` prefix), artifact
    echo-server-lite_<version>_<os>_<arch>.tar.gz, verify checksums, extract.
 2. Start with no database at all:
      ECHO_SERVER_LITE=1 PORT=8443 HTTP_PORT=8080 ./echo-server-lite
@@ -820,7 +820,7 @@ make release-snapshot    # local archives + checksums in dist/ (no publish)
 Release flow (full checklist: [RELEASING.md](RELEASING.md)):
 
 1. `git tag v1.0.0 && git push origin v1.0.0` — publishes the **full** product.
-2. `git tag lite-1.0.0 && git push origin lite-1.0.0` — publishes the **lite** build, as its own
+2. `git tag 1.0.0 && git push origin 1.0.0` — publishes the **lite** build, as its own
    release, tagged and artifacted separately (`echo-server-lite_*`), so the two never mix.
 3. `.github/workflows/release.yml` runs the tests, a live smoke test of the built binary (`/ip`, `/echo`,
    the console page and `/api/login`), then GoReleaser; its `before` hooks build `frontend/dist`.

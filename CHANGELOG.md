@@ -54,7 +54,7 @@ All notable changes to this project are documented here. The format follows
 
 - **Lite build** (`ECHO_SERVER_LITE=1`): runs with no database at all — no SQLite, no users, no datasets,
   no admin API, no query log. Serves `/ip`, `/echo`, `/health` and `/metrics`; everything else answers
-  404. Published as its own release (tag `lite-v*`, `.goreleaser-lite.yaml`) so the artifacts never mix
+  404. Published as its own release (plain semver tags `1.x.y`, `.goreleaser-lite.yaml`) so the artifacts never mix
   with the full product. Verified at **100,000 concurrent connections, 0 failures, 230k+ rps, ~713 MB RSS**
   on a 32-core host.
 - **README**: copy-paste prompts for AI agents (Claude Code / Codex / any shell agent) that install,
