@@ -11,6 +11,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -19,9 +20,11 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"path"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -44,6 +47,7 @@ type EchoResponse struct {
 	ClientHello *ClientHelloInfo    `json:"client_hello,omitempty"`
 	Client      *ClientInfo         `json:"client,omitempty"` // inferred client identification
 	JA4H        string              `json:"ja4h,omitempty"`   // HTTP-layer client fingerprint
+	HTTP2       *h2Fingerprint      `json:"http2,omitempty"`  // HTTP/2 SETTINGS/priority/pseudo-header fingerprint
 	TLS         *TLSFingerprint     `json:"tls,omitempty"`
 	IP          *IPInfo             `json:"ip,omitempty"`
 }
@@ -114,6 +118,7 @@ type IPInfo struct {
 	IsVPN          *bool   `json:"is_vpn,omitempty"`
 	IsTor          *bool   `json:"is_tor,omitempty"`
 	IsHosting      *bool   `json:"is_hosting,omitempty"`
+	Anycast        *bool   `json:"anycast,omitempty"`    // provider says the address is anycast: city is not meaningful
 	GeoSource      string  `json:"geo_source,omitempty"` // ipwhois | ipapi | ipinfo | local
 }
 
@@ -145,10 +150,17 @@ func main() {
 		log.Fatalf("failed to load key pair: %v", err)
 	}
 
+	// Advertise h2 alongside HTTP/1.1 so the HTTP/2 fingerprint can be
+	// captured; operators can pin HTTP/1.1-only with enable_http2=false.
+	nextProtos := []string{"http/1.1"}
+	if h2SniffEnabled() {
+		nextProtos = []string{"h2", "http/1.1"}
+	}
 	tlsConfig := &tls.Config{
 		Certificates: []tls.Certificate{cert},
 		MinVersion:   tls.VersionTLS12,
 		MaxVersion:   tls.VersionTLS13,
+		NextProtos:   nextProtos,
 	}
 
 	ln, err := net.Listen("tcp", ":"+port)
@@ -159,84 +171,140 @@ func main() {
 	tlsLn := tls.NewListener(wrappedLn, tlsConfig)
 
 	mux := http.NewServeMux()
-	// Public account entry points: first-run setup, login, and optional
-	// self-registration (admin-controlled, new accounts are viewers).
-	mux.HandleFunc("/api/setup/status", setupStatusHandler)
-	mux.HandleFunc("/api/setup", setupHandler)
-	mux.HandleFunc("/api/register", registerHandler)
-	mux.HandleFunc("/api/login", loginHandler)
-	// Account system: every authenticated user can read their own profile and
-	// rotate their password; only admins can manage other accounts.
-	mux.HandleFunc("/api/me", authMiddleware(meHandler))
-	mux.HandleFunc("/api/me/password", authMiddleware(changePasswordHandler))
-	mux.HandleFunc("/api/users", adminMiddleware(usersHandler))
-	mux.HandleFunc("/api/config", adminWriteMiddleware(configHandler))
-	mux.HandleFunc("/api/logs", authMiddleware(logsHandler))
-	mux.HandleFunc("/api/stats", authMiddleware(statsHandler))
-	// Data-provider API: every dataset (JA4 libs, CIDR tables, keywords, …)
-	// is configured through the same endpoints.
-	mux.HandleFunc("/api/datasets", adminWriteMiddleware(datasetsHandler))
-	mux.HandleFunc("/api/datasets/sync", adminWriteMiddleware(datasetsSyncHandler))
-	// IP-intelligence chain: built-in drivers (ipwho.is → ip-api.com → ipinfo.io)
-	// plus operator-added cloud APIs / commands, in priority order.
-	mux.HandleFunc("/api/ipproviders", adminWriteMiddleware(ipProvidersHandler))
-	mux.HandleFunc("/api/ipproviders/test", adminWriteMiddleware(ipProvidersTestHandler))
-	// Legacy JA4 endpoints remain as aliases for the "ja4" dataset.
-	mux.HandleFunc("/api/ja4providers", adminWriteMiddleware(ja4providersHandler))
-	mux.HandleFunc("/api/ja4providers/sync", adminWriteMiddleware(ja4providersSyncHandler))
-	// Observability & operations: audit trail, notifications, metrics, exports,
-	// scheduled maintenance and destructive admin actions.
-	mux.HandleFunc("/api/audit", authMiddleware(auditHandler))
-	mux.HandleFunc("/api/audit/export.csv", authMiddleware(auditHandler))
-	mux.HandleFunc("/api/notifications", authMiddleware(notificationHandler))
-	mux.HandleFunc("/api/views", authMiddleware(savedViewHandler))
-	mux.HandleFunc("/api/apikeys", adminMiddleware(apiKeysHandler))
-	mux.HandleFunc("/api/webhooks", adminMiddleware(webhookHandler))
-	mux.HandleFunc("/api/webhooks/test", adminMiddleware(webhookTestHandler))
-	mux.HandleFunc("/api/system", authMiddleware(systemHandler))
-	mux.HandleFunc("/api/system/environment", adminMiddleware(environmentHandler))
-	mux.HandleFunc("/api/system/backup", adminMiddleware(backupHandler))
-	mux.HandleFunc("/api/system/purge-logs", adminMiddleware(purgeLogsHandler))
-	mux.HandleFunc("/api/system/rotate-jwt", adminMiddleware(rotateJWTHandler))
-	mux.HandleFunc("/api/metrics/summary", authMiddleware(metricsSummaryHandler))
-	mux.HandleFunc("/metrics", prometheusHandler)
-	mux.HandleFunc("/api/export/logs.csv", authMiddleware(logsExportHandler))
-	mux.HandleFunc("/api/export/logs.json", authMiddleware(logsExportHandler))
-	mux.HandleFunc("/api/export/users.csv", adminMiddleware(usersExportHandler))
-	mux.HandleFunc("/api/export/users.json", adminMiddleware(usersExportHandler))
-	mux.HandleFunc("/api/export/config.json", adminMiddleware(configExportHandler))
-	mux.HandleFunc("/api/replay", adminMiddleware(replayHandler))
-	mux.HandleFunc("/api/ja4/search", authMiddleware(ja4SearchHandler))
-	mux.HandleFunc("/api/ja4/stats", authMiddleware(ja4StatsHandler))
-	mux.HandleFunc("/api/openapi.json", openAPIHandler)
-	mux.HandleFunc("/api/endpoints", authMiddleware(endpointsHandler))
-	mux.HandleFunc("/health", healthHandler)
 
-	// Serve embedded React frontend under /ui. Unknown extension-less paths
-	// fall back to index.html so client-side routes survive a refresh
-	// (e.g. /ui/users), while missing assets still return an honest 404.
-	uiFS, _ := fs.Sub(frontendFS, "frontend/dist")
-	mux.Handle("/ui/", http.StripPrefix("/ui/", newSPAHandler(uiFS)))
+	// Lite mode: only the endpoints that need no database. Registering the
+	// console routes would leave them reachable-but-broken (every handler
+	// expects SQLite), so they are omitted rather than degraded.
+	// Lite mode registers only the endpoints that need no database; every
+	// console handler expects SQLite, so registering them would leave
+	// reachable-but-broken routes.
+	lite := os.Getenv("ECHO_SERVER_LITE") == "1"
+	if lite {
+		mux.HandleFunc("/health", healthHandler)
+		mux.HandleFunc("/ip", ipOnlyHandler)
+		mux.HandleFunc("/echo", echoHandler)
+		mux.HandleFunc("/metrics", prometheusHandler)
+		mux.HandleFunc("/ui/", func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, "the console is not part of the lite build; use the standard release", http.StatusNotFound)
+		})
+		mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, "the admin API is not part of the lite build; use the standard release", http.StatusNotFound)
+		})
+		mux.HandleFunc("/", echoHandler)
+		log.Printf("lite mode: console and admin API disabled (no database)")
+	} else {
+		// Public account entry points: first-run setup, login, and optional
+		// self-registration (admin-controlled, new accounts are viewers).
+		mux.HandleFunc("/api/setup/status", setupStatusHandler)
+		// Credential endpoints carry their own always-on throttle: the echo limiter
+		// never covered /api/*, so password guessing was previously unthrottled.
+		mux.HandleFunc("/api/setup", authThrottleMiddleware(setupHandler))
+		mux.HandleFunc("/api/register", authThrottleMiddleware(registerHandler))
+		mux.HandleFunc("/api/login", authThrottleMiddleware(loginHandler))
+		// Account system: every authenticated user can read their own profile and
+		// rotate their password; only admins can manage other accounts.
+		mux.HandleFunc("/api/me", authMiddleware(meHandler))
+		mux.HandleFunc("/api/me/password", authMiddleware(changePasswordHandler))
+		mux.HandleFunc("/api/users", adminMiddleware(usersHandler))
+		mux.HandleFunc("/api/config", adminWriteMiddleware(configHandler))
+		mux.HandleFunc("/api/logs", authMiddleware(logsHandler))
+		mux.HandleFunc("/api/stats", authMiddleware(statsHandler))
+		// Data-provider API: every dataset (JA4 libs, CIDR tables, keywords, …)
+		// is configured through the same endpoints.
+		mux.HandleFunc("/api/datasets", adminWriteMiddleware(datasetsHandler))
+		mux.HandleFunc("/api/datasets/sync", adminWriteMiddleware(datasetsSyncHandler))
+		// IP-intelligence chain: built-in drivers (ipwho.is → ip-api.com → ipinfo.io)
+		// plus operator-added cloud APIs / commands, in priority order.
+		mux.HandleFunc("/api/ipproviders", adminWriteMiddleware(ipProvidersHandler))
+		mux.HandleFunc("/api/ipproviders/test", adminWriteMiddleware(ipProvidersTestHandler))
+		// Explicit IP-location API: look up addresses the caller names, rather than
+		// only the caller's own address as /echo does. Accounts can query; the
+		// endpoints are empty unless online lookup is enabled.
+		mux.HandleFunc("/api/ip/lookup", authMiddleware(ipLookupHandler))
+		// Bulk uses POST only to carry a plain-text body; it reads, it does not
+		// mutate, so viewer accounts may use it too.
+		mux.HandleFunc("/api/ip/lookup/bulk", authMiddleware(ipBulkHandler))
+		mux.HandleFunc("/api/ip/history", authMiddleware(ipLookupHistoryHandler))
+		// GitHub badge for the console header; the star count is cached for 30
+		// minutes (see github_badge.go), so this endpoint is cheap to poll.
+		mux.HandleFunc("/api/github", authMiddleware(githubBadgeHandler))
+		// Legacy JA4 endpoints remain as aliases for the "ja4" dataset.
+		mux.HandleFunc("/api/ja4providers", adminWriteMiddleware(ja4providersHandler))
+		mux.HandleFunc("/api/ja4providers/sync", adminWriteMiddleware(ja4providersSyncHandler))
+		// Observability & operations: audit trail, notifications, metrics, exports,
+		// scheduled maintenance and destructive admin actions.
+		mux.HandleFunc("/api/audit", authMiddleware(auditHandler))
+		mux.HandleFunc("/api/audit/export.csv", authMiddleware(auditHandler))
+		mux.HandleFunc("/api/notifications", authMiddleware(notificationHandler))
+		mux.HandleFunc("/api/views", authMiddleware(savedViewHandler))
+		mux.HandleFunc("/api/apikeys", adminMiddleware(apiKeysHandler))
+		mux.HandleFunc("/api/webhooks", adminMiddleware(webhookHandler))
+		mux.HandleFunc("/api/webhooks/test", adminMiddleware(webhookTestHandler))
+		mux.HandleFunc("/api/system", authMiddleware(systemHandler))
+		mux.HandleFunc("/api/system/environment", adminMiddleware(environmentHandler))
+		mux.HandleFunc("/api/system/backup", adminMiddleware(backupHandler))
+		mux.HandleFunc("/api/system/purge-logs", adminMiddleware(purgeLogsHandler))
+		mux.HandleFunc("/api/system/rotate-jwt", adminMiddleware(rotateJWTHandler))
+		mux.HandleFunc("/api/metrics/summary", authMiddleware(metricsSummaryHandler))
+		mux.HandleFunc("/metrics", prometheusHandler)
+		mux.HandleFunc("/api/export/logs.csv", authMiddleware(logsExportHandler))
+		mux.HandleFunc("/api/export/logs.json", authMiddleware(logsExportHandler))
+		mux.HandleFunc("/api/export/users.csv", adminMiddleware(usersExportHandler))
+		mux.HandleFunc("/api/export/users.json", adminMiddleware(usersExportHandler))
+		mux.HandleFunc("/api/export/config.json", adminMiddleware(configExportHandler))
+		mux.HandleFunc("/api/replay", adminMiddleware(replayHandler))
+		mux.HandleFunc("/api/ja4/search", authMiddleware(ja4SearchHandler))
+		mux.HandleFunc("/api/ja4/stats", authMiddleware(ja4StatsHandler))
+		mux.HandleFunc("/api/openapi.json", openAPIHandler)
+		mux.HandleFunc("/api/endpoints", authMiddleware(endpointsHandler))
+		mux.HandleFunc("/health", healthHandler)
+		// Fast path: reply with the caller's egress IP and nothing else. Exists so
+		// IP-check workloads (proxy pools, crawler egress checks) do not pay for
+		// TLS parsing, client identification, geolocation or the query log.
+		mux.HandleFunc("/ip", ipOnlyHandler)
 
-	// Root handler: SPA redirect for / and /ui*, echo handler otherwise.
-	// When require_token=true, the echo endpoint enforces a valid JWT or API token.
-	mux.HandleFunc("/", rootHandler)
+		// Serve embedded React frontend under /ui. Unknown extension-less paths
+		// fall back to index.html so client-side routes survive a refresh
+		// (e.g. /ui/users), while missing assets still return an honest 404.
+		uiFS, _ := fs.Sub(frontendFS, "frontend/dist")
+		mux.Handle("/ui/", http.StripPrefix("/ui/", newSPAHandler(uiFS)))
+
+		// Root handler: SPA redirect for / and /ui*, echo handler otherwise.
+		// When require_token=true, the echo endpoint enforces a valid JWT or API token.
+		mux.HandleFunc("/", rootHandler)
+
+	}
 
 	// Create the users table and, for headless deployments, bootstrap the first
 	// admin from ECHO_SERVER_ADMIN_USERNAME/PASSWORD. Interactive installs stay
 	// empty and get the first-admin setup wizard in the console.
-	initUsers()
-	// Assemble all data sets: embedded defaults attached, persisted/环境
-	// providers loaded, remote auto-refresh loops started.
-	initAllDatasets()
-	// Assemble the IP-intelligence lookup chain (built-in drivers + custom
-	// cloud APIs/commands). The legacy geo_* config keys keep working on top.
-	initIPProviders()
-	initExtraDB()
-	startMaintenanceWorker()
+	// In lite mode none of this runs: no SQLite, no users, no datasets, no
+	// maintenance loop. That is what keeps the request path off disk entirely.
+	if !lite {
+		initUsers()
+		// Assemble all data sets: embedded defaults attached, persisted/环境
+		// providers loaded, remote auto-refresh loops started.
+		initAllDatasets()
+		// Assemble the IP-intelligence lookup chain (built-in drivers + custom
+		// cloud APIs/commands). The legacy geo_* config keys keep working on top.
+		initIPProviders()
+		initExtraDB()
+		startMaintenanceWorker()
+	}
 
 	server := &http.Server{
 		Handler: securityMiddleware(mux),
+		// Timeouts matter under load: without them a slow or dead client holds
+		// a goroutine (and, for TLS, a handshake) forever. ReadHeader bounds
+		// the pre-request phase, Idle bounds keep-alive reuse (10k idle
+		// connections otherwise pin 10k goroutines), and Read/Write bound a
+		// single request. MaxHeaderBytes is already bounded by net/http
+		// (1 MB), but a smaller cap sheds junk earlier.
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       90 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		MaxHeaderBytes:    64 << 10,
 		// Bind each accepted connection into the request context so the
 		// echo handler can read THIS connection's ClientHello (not a global,
 		// which would cross-contaminate concurrent requests).
@@ -251,6 +319,15 @@ func main() {
 			return context.WithValue(ctx, echoCtxKey{}, c)
 		},
 	}
+	// Take over negotiated-h2 connections so SETTINGS/PRIORITY/pseudo-header
+	// order can be recorded; the standard library's own h2 handler would hide
+	// them. HTTP/1.x connections are served by the normal loop above.
+	if h2SniffEnabled() {
+		if server.TLSNextProto == nil {
+			server.TLSNextProto = map[string]func(*http.Server, *tls.Conn, http.Handler){}
+		}
+		server.TLSNextProto["h2"] = h2ConnHook()
+	}
 
 	// A plain-HTTP listener makes the console reachable without accepting a
 	// self-signed certificate warning. It serves the same routes (UI, APIs and
@@ -260,31 +337,87 @@ func main() {
 	if httpPort == "" {
 		httpPort = "8080"
 	}
+	var plainServer *http.Server
 	if httpPort != "0" && !strings.EqualFold(httpPort, "off") {
 		plainLn, err := net.Listen("tcp", ":"+httpPort)
 		if err != nil {
 			log.Printf("WARNING: plain HTTP listener on :%s failed: %v (console stays HTTPS-only)", httpPort, err)
 		} else {
-			plainServer := &http.Server{
-				Handler: securityMiddleware(mux),
+			plainServer = &http.Server{
+				Handler:           securityMiddleware(mux),
+				ReadHeaderTimeout: 10 * time.Second,
+				IdleTimeout:       90 * time.Second,
+				ReadTimeout:       30 * time.Second,
+				WriteTimeout:      30 * time.Second,
+				MaxHeaderBytes:    64 << 10,
 				ConnContext: func(ctx context.Context, c net.Conn) context.Context {
 					return context.WithValue(ctx, echoCtxKey{}, c)
 				},
 			}
 			go func() {
 				log.Printf("console available over plain HTTP on :%s (http://<LAN-IP>:%s/ui/)", httpPort, httpPort)
-				log.Fatal(plainServer.Serve(plainLn))
+				if err := plainServer.Serve(plainLn); err != nil && !errors.Is(err, http.ErrServerClosed) {
+					log.Printf("plain HTTP listener stopped: %v", err)
+				}
 			}()
 		}
 	}
 
 	log.Printf("echo-server listening on :%s (HTTPS, ClientHello capture enabled)", port)
-	log.Fatal(server.Serve(tlsLn))
+
+	// Graceful shutdown: on SIGINT/SIGTERM stop accepting new connections,
+	// let in-flight requests finish (they may be waiting on a geo lookup or a
+	// large upload), then close. Without this a supervisor restart kills
+	// mid-request work and the SQLite writer.
+	//
+	// Shutdown runs on the main goroutine after Serve returns: calling
+	// Shutdown from a goroutine while main exits on Serve's return would cut
+	// the drain short (Serve returns as soon as listeners close, before
+	// in-flight handlers finish).
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	serveErr := make(chan error, 1)
+	go func() { serveErr <- server.Serve(tlsLn) }()
+
+	select {
+	case err := <-serveErr:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatal(err)
+		}
+	case <-sigCh:
+		const drain = 15 * time.Second
+		ctx, cancel := context.WithTimeout(context.Background(), drain)
+		defer cancel()
+		log.Printf("shutdown signal received; draining for up to %s", drain)
+		if err := server.Shutdown(ctx); err != nil {
+			log.Printf("HTTPS drain: %v", err)
+		}
+		if plainServer != nil {
+			if err := plainServer.Shutdown(ctx); err != nil {
+				log.Printf("HTTP drain: %v", err)
+			}
+		}
+		// Commit any queued query-log rows before closing the database;
+		// otherwise the last batch window of requests is lost on every
+		// restart. Bounded by the same drain context.
+		if ctx.Err() == nil {
+			FlushQueryLog()
+		}
+		if db != nil {
+			if err := db.Close(); err != nil {
+				log.Printf("database close: %v", err)
+			}
+		}
+		log.Printf("shutdown complete")
+	}
 }
 
 // rootHandler serves the SPA redirect and routes everything else to the echo
 // endpoint, enforcing the optional token requirement.
 func rootHandler(w http.ResponseWriter, r *http.Request) {
+	// /ip is registered by path, but the catch-all "/" also sees it when the
+	// ServeMux picks the more specific pattern; kept here only for clarity.
 	if r.URL.Path == "/" || strings.HasPrefix(r.URL.Path, "/ui") {
 		http.Redirect(w, r, "/ui/", http.StatusFound)
 		return
@@ -381,6 +514,12 @@ func echoHandler(w http.ResponseWriter, r *http.Request) {
 		resp.JA4H = ja4hFingerprint(r)
 	}
 
+	// HTTP/2 fingerprint: only present for connections that negotiated h2.
+	if cap := h2CaptureFromRequest(r); cap != nil {
+		fp := cap.fingerprint(r.Method, r.URL.Path)
+		resp.HTTP2 = &fp
+	}
+
 	// Expose JA3/JA4 once (tls object mirrors client_hello).
 	if resp.ClientHello.JA3 != "" {
 		if resp.TLS == nil {
@@ -398,10 +537,31 @@ func echoHandler(w http.ResponseWriter, r *http.Request) {
 		resp.IP = fetchIPInfo(ip)
 	}
 
-	// Persist minimal query log via SQLite (real path). Replays are synthetic
-	// and must not inflate the production counters.
+	// Persist the query log via SQLite (real path). Replays are synthetic and
+	// must not inflate the production counters. The client-identification
+	// verdict is stored alongside the IP data so the console can answer
+	// "which clients hit us" and "how many UA spoofs" from history, not just
+	// from the live response.
 	if resp.IP != nil && !isReplay(r) {
-		LogQuery(r.Method, r.URL.Path, resp.IP.IP, resp.IP.ConnectionType, resp.IP.Country)
+		rec := queryRecord{
+			Method:         r.Method,
+			Path:           r.URL.Path,
+			IP:             resp.IP.IP,
+			ConnectionType: resp.IP.ConnectionType,
+			Country:        resp.IP.Country,
+			UserAgent:      r.Header.Get("User-Agent"),
+		}
+		if resp.Client != nil {
+			rec.ClientName = resp.Client.Name
+			rec.ClientFamily = resp.Client.Family
+			rec.ClientSource = resp.Client.Source
+			rec.Spoofed = resp.Client.Spoofed
+		}
+		if resp.ClientHello != nil {
+			rec.JA4 = resp.ClientHello.JA4
+			rec.JA3 = resp.ClientHello.JA3Hash
+		}
+		LogQueryDetailed(rec)
 	}
 
 	// Admin-configurable default field toggles (request params can only narrow,
@@ -410,6 +570,15 @@ func echoHandler(w http.ResponseWriter, r *http.Request) {
 	showIP := GetConfig("show_ip") != "false"
 	showRaw := GetConfig("show_raw") != "false"
 	showBody := GetConfig("show_body") != "false"
+
+	// Credential-bearing request headers are masked by default when echoing.
+	// The echo endpoint is often public, and reflecting Authorization/Cookie/
+	// X-API-Key verbatim turns every request into a credential leak in logs,
+	// screenshots and shared curl output. Operators debugging token handling
+	// can turn masking off explicitly.
+	if GetConfig("redact_sensitive_headers") != "false" {
+		resp.Headers = redactSensitiveHeaders(resp.Headers)
+	}
 
 	if !showJA3 && resp.TLS != nil {
 		resp.TLS.JA3String, resp.TLS.JA3Hash = "", ""
@@ -452,7 +621,14 @@ func echoHandler(w http.ResponseWriter, r *http.Request) {
 	if resp.Client != nil {
 		clientName = resp.Client.Name
 	}
-	log.Printf("%s %s %s %d %s client=%s", r.Method, r.URL.Path, r.RemoteAddr, http.StatusOK, time.Since(start), clientName)
+	// Access logging is opt-in: log.Printf locks os.Stderr and formats a line
+	// for EVERY request, which at 10k+ rps dominates the profile (a load test
+	// produced a 34 MB log in seconds) and turns stderr into the bottleneck.
+	// The query log already records the same fields in SQLite; the console is
+	// the place to read them. access_log=true restores the line-for-line log.
+	if GetConfig("access_log") == "true" {
+		log.Printf("%s %s %s %d %s client=%s", r.Method, r.URL.Path, r.RemoteAddr, http.StatusOK, time.Since(start), clientName)
+	}
 }
 
 // requestParam resolves a control value as: query param > header > fallback.
@@ -470,20 +646,23 @@ func requestParam(r *http.Request, queryKey, headerKey, fallback string) string 
 func configHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		cfg := map[string]string{
-			"show_ja3":           GetConfig("show_ja3"),
-			"show_ip":            GetConfig("show_ip"),
-			"show_raw":           GetConfig("show_raw"),
-			"show_body":          GetConfig("show_body"),
-			"show_client":        GetConfig("show_client"),
-			"show_ja4h":          GetConfig("show_ja4h"),
-			"require_token":      GetConfig("require_token"),
-			"allow_registration": GetConfig("allow_registration"),
-			"enable_online_geo":  GetConfig("enable_online_geo"),
-			"geo_provider":       GetConfig("geo_provider"),
-			"geo_cache_ttl":      GetConfig("geo_cache_ttl"),
-			"default_format":     GetConfig("default_format"),
-			"ipinfo_token":       GetConfig("ipinfo_token"),
-			"api_token":          GetConfig("api_token"),
+			"show_ja3":                 GetConfig("show_ja3"),
+			"show_ip":                  GetConfig("show_ip"),
+			"show_raw":                 GetConfig("show_raw"),
+			"show_body":                GetConfig("show_body"),
+			"show_client":              GetConfig("show_client"),
+			"show_ja4h":                GetConfig("show_ja4h"),
+			"redact_sensitive_headers": GetConfig("redact_sensitive_headers"),
+			"enable_http2":             GetConfig("enable_http2"),
+			"github_repo":              GetConfig("github_repo"),
+			"require_token":            GetConfig("require_token"),
+			"allow_registration":       GetConfig("allow_registration"),
+			"enable_online_geo":        GetConfig("enable_online_geo"),
+			"geo_provider":             GetConfig("geo_provider"),
+			"geo_cache_ttl":            GetConfig("geo_cache_ttl"),
+			"default_format":           GetConfig("default_format"),
+			"ipinfo_token":             GetConfig("ipinfo_token"),
+			"api_token":                GetConfig("api_token"),
 			// Console / edge-operations settings.
 			"site_name":           GetConfig("site_name"),
 			"site_description":    GetConfig("site_description"),

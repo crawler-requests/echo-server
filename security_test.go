@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -56,18 +57,37 @@ func TestParseIPRulesAndCheckIP(t *testing.T) {
 func TestAllowRate(t *testing.T) {
 	setConfigForTest(t, "rate_limit_per_min", "2")
 	ip := "192.0.2.201"
-	if !allowRate(ip) || !allowRate(ip) {
+	if !allowRate(ip, ip) || !allowRate(ip, ip) {
 		t.Fatal("first two requests should pass")
 	}
-	if allowRate(ip) {
+	if allowRate(ip, ip) {
 		t.Fatal("third request exceeded the budget but was allowed")
 	}
-	if !allowRate("192.0.2.202") {
+	if !allowRate("192.0.2.202", "192.0.2.202") {
 		t.Fatal("a different IP should have its own bucket")
 	}
 	setConfigForTest(t, "rate_limit_per_min", "0")
-	if !allowRate(ip) || !allowRate(ip) || !allowRate(ip) {
+	if !allowRate(ip, ip) || !allowRate(ip, ip) || !allowRate(ip, ip) {
 		t.Fatal("limit 0 should disable the limiter")
+	}
+}
+
+// A client that rotates X-Forwarded-For must not escape the limit: the TCP
+// peer bucket still runs out.
+func TestAllowRate_PeerBucketStopsXFFRotation(t *testing.T) {
+	setConfigForTest(t, "rate_limit_per_min", "3")
+	peer := "192.0.2.77"
+	for i := 0; i < 3; i++ {
+		if !allowRate(fmt.Sprintf("203.0.113.%d", i), peer) {
+			t.Fatalf("request %d should pass", i+1)
+		}
+	}
+	if allowRate("203.0.113.99", peer) {
+		t.Fatal("rotating X-Forwarded-For escaped the peer bucket")
+	}
+	// A different real client is unaffected by the exhausted peer.
+	if !allowRate("203.0.113.50", "192.0.2.88") {
+		t.Fatal("a different peer got a fresh bucket")
 	}
 }
 

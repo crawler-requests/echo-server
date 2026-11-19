@@ -8,6 +8,7 @@ import {
   BookOutlined,
   DashboardOutlined,
   DatabaseOutlined,
+  EnvironmentOutlined,
   GlobalOutlined,
   HistoryOutlined,
   LineChartOutlined,
@@ -26,6 +27,7 @@ import {
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { User } from '../api';
 import { SessionCtx } from '../session';
+import GitHubBadge from '../components/GitHubBadge';
 
 const { Header, Sider, Content } = Layout;
 
@@ -33,6 +35,7 @@ const PAGE_META: Record<string, { title: string; sub: string }> = {
   '/': { title: '概览', sub: '服务状态、趋势、通知与最近活动' },
   '/echo': { title: '回显设置', sub: '控制 /echo 响应中暴露的字段与默认格式' },
   '/ip': { title: 'IP 情报', sub: '地理位置、ASN 与代理类型的在线查询配置' },
+  '/lookup': { title: 'IP 定位查询', sub: '指定任意 IP，查地理位置、ASN 与连接类型' },
   '/datasets': { title: '数据源', sub: 'JA4 指纹库、CIDR 表与关键词库的 Provider' },
   '/chain': { title: 'IP 查询链路', sub: '按优先级串联云端 API、本地命令与内置驱动' },
   '/fingerprints': { title: 'JA4 指纹库', sub: '跨 Provider 搜索指纹与客户端分布' },
@@ -53,6 +56,7 @@ const PAGE_META: Record<string, { title: string; sub: string }> = {
 const MENU_ITEMS: { key: string; label: string; icon: React.ReactNode; admin?: boolean }[] = [
   { key: '/', label: '概览', icon: <DashboardOutlined /> },
   { key: '/echo', label: '回显设置', icon: <ApiOutlined /> },
+  { key: '/lookup', label: 'IP 定位查询', icon: <EnvironmentOutlined /> },
   { key: '/ip', label: 'IP 情报', icon: <GlobalOutlined /> },
   { key: '/datasets', label: '数据源', icon: <DatabaseOutlined /> },
   { key: '/chain', label: 'IP 查询链路', icon: <PartitionOutlined /> },
@@ -138,6 +142,7 @@ const AppLayout: React.FC<Props> = ({ token, me, onLogout }) => {
     () => [
       { key: '/', icon: <DashboardOutlined />, label: '概览' },
       { key: '/echo', icon: <ApiOutlined />, label: '回显设置' },
+      { key: '/lookup', icon: <EnvironmentOutlined />, label: 'IP 定位查询' },
       { key: '/ip', icon: <GlobalOutlined />, label: 'IP 情报' },
       {
         type: 'group',
@@ -271,6 +276,7 @@ const AppLayout: React.FC<Props> = ({ token, me, onLogout }) => {
           </div>
 
           <div className="header-right">
+            <GitHubBadge token={token} />
             {!mobile && (
               <Button type="text" icon={<SearchOutlined />} onClick={() => setPaletteOpen(true)} title="Ctrl+K">
                 快速跳转

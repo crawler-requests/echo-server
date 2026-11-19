@@ -1,0 +1,105 @@
+name: Release (lite)
+
+# Publishes the lite build as its own GitHub Release.
+#
+#   git tag lite-v1.0.0 && git push origin lite-v1.0.0
+#
+# The lite binary runs without a database (`ECHO_SERVER_LITE=1`) and serves only
+# /ip and /echo. It has a separate tag namespace so the artifacts never mix with
+# the full release produced by .github/workflows/release.yml.
+
+on:
+  push:
+    tags:
+      - "lite-v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-lite-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    name: Smoke-test the lite build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # //go:embed needs the directory to exist; the lite build never serves it.
+      - name: Provide embed placeholder
+        run: |
+          mkdir -p frontend/dist
+          echo '<!doctype html><title>lite</title>' > frontend/dist/index.html
+
+      - name: Build lite binary
+        run: |
+          CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o echo-server-lite .
+
+      # Prove the thing we are about to publish actually works, without a DB.
+      - name: Smoke test (no database, /ip only)
+        run: |
+          ECHO_SERVER_LITE=1 PORT=28443 HTTP_PORT=28080 ./echo-server-lite &
+          SERVER_PID=$!
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:28080/health >/dev/null && break
+            sleep 1
+          done
+          echo "--- /ip ---"
+          curl -sf http://127.0.0.1:28080/ip | tee /tmp/ip.json
+          grep -q '"ip"' /tmp/ip.json
+          echo "--- /ip?format=text ---"
+          curl -sf 'http://127.0.0.1:28080/ip?format=text'
+          echo "--- console must be absent ---"
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:28080/ui/)" = "404"
+          echo "--- admin API must be absent ---"
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:28080/api/config)" = "404"
+          echo "--- no database file was created ---"
+          test ! -e echo.db && test ! -e echo.db-wal
+          kill $SERVER_PID
+
+      - name: Go tests
+        run: go test ./... -count=1
+
+  goreleaser:
+    name: Build and publish lite release
+    needs: smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run GoReleaser (lite config, publish)
+        if: startsWith(github.ref, 'refs/tags/lite-v')
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean --config .goreleaser-lite.yaml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run GoReleaser (lite config, snapshot)
+        if: ${{ !startsWith(github.ref, 'refs/tags/lite-v') }}
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean --snapshot --config .goreleaser-lite.yaml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -64,30 +64,53 @@ jobs:
           ECHO_SERVER_DB=/tmp/ci-echo.db \
           ECHO_SERVER_ADMIN_USERNAME=ciadmin \
           ECHO_SERVER_ADMIN_PASSWORD='ci-password-123' \
-          PORT=18443 HTTP_PORT=18080 /tmp/echo-server > /tmp/echo-ci.log 2>&1 &
+          PORT=29443 HTTP_PORT=29080 /tmp/echo-server > /tmp/echo-ci.log 2>&1 &
           PID=$!
           trap 'kill $PID 2>/dev/null || true; cat /tmp/echo-ci.log' EXIT
 
           for i in $(seq 1 30); do
-            curl -fsS http://127.0.0.1:18080/health >/dev/null 2>&1 && break
+            curl -fsS http://127.0.0.1:29080/health >/dev/null 2>&1 && break
             sleep 1
           done
-          test "$(curl -fsS http://127.0.0.1:18080/health)" = '{"status":"ok"}'
+          test "$(curl -fsS http://127.0.0.1:29080/health)" = '{"status":"ok"}'
 
           # The console must come from the embedded filesystem: HTML + hashed asset.
-          curl -fsS http://127.0.0.1:18080/ui/ | grep -q 'id="root"'
-          ASSET=$(curl -fsS http://127.0.0.1:18080/ui/ | grep -oE '/ui/assets/[^"]+\.js' | head -1)
+          curl -fsS http://127.0.0.1:29080/ui/ | grep -q 'id="root"'
+          ASSET=$(curl -fsS http://127.0.0.1:29080/ui/ | grep -oE '/ui/assets/[^"]+\.js' | head -1)
           test -n "$ASSET"
-          curl -fsS -o /dev/null "http://127.0.0.1:18080$ASSET"
+          curl -fsS -o /dev/null "http://127.0.0.1:29080$ASSET"
 
           # ldflags must reach /api/system.
-          TOKEN=$(curl -fsS -X POST http://127.0.0.1:18080/api/login \
+          TOKEN=$(curl -fsS -X POST http://127.0.0.1:29080/api/login \
             -H 'Content-Type: application/json' \
             -d '{"username":"ciadmin","password":"ci-password-123"}' \
             | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
-          curl -fsS http://127.0.0.1:18080/api/system \
+          curl -fsS http://127.0.0.1:29080/api/system \
             -H "Authorization: Bearer $TOKEN" \
             | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["version"]=="ci", d; assert d["build_commit"], d'
+
+          # The fast path is a separate, minimal response — regression-check it.
+          curl -fsS http://127.0.0.1:29080/ip | grep -q '"ip"'
+          test "$(curl -fsS 'http://127.0.0.1:29080/ip?format=text' | wc -c)" -ge 4
+
+      # Lite mode must keep working: same binary, no database, /ip only.
+      - name: Smoke test lite mode (no database)
+        run: |
+          ECHO_SERVER_LITE=1 PORT=28443 HTTP_PORT=28080 /tmp/echo-server > /tmp/echo-lite.log 2>&1 &
+          PID=$!
+          trap 'kill $PID 2>/dev/null || true; cat /tmp/echo-lite.log' EXIT
+          for i in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:28080/health >/dev/null 2>&1 && break
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:28080/ip | grep -q '"ip"'
+          curl -fsS 'http://127.0.0.1:28080/ip?format=text' >/dev/null
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:28080/ui/)" = "404"
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:28080/api/config)" = "404"
+          curl -fsS http://127.0.0.1:28080/metrics | grep -q echo_ip_only_requests_total
+          # No database file may exist in the working directory (the whole
+          # point of lite mode is that nothing touches disk).
+          test ! -e echo.db && test ! -e echo.db-wal && test ! -e echo.db-shm
 
   docker:
     name: Docker image
@@ -101,15 +124,15 @@ jobs:
 
       - name: Run container and check the console
         run: |
-          docker run -d --name echo-ci -p 18081:8080 \
+          docker run -d --name echo-ci -p 29081:8080 \
             -e ECHO_SERVER_ADMIN_USERNAME=ciadmin \
             -e ECHO_SERVER_ADMIN_PASSWORD='ci-password-123' \
             echo-server:ci
           trap 'docker logs echo-ci; docker rm -f echo-ci' EXIT
 
           for i in $(seq 1 30); do
-            curl -fsS http://127.0.0.1:18081/health >/dev/null 2>&1 && break
+            curl -fsS http://127.0.0.1:28080/health >/dev/null 2>&1 && break
             sleep 1
           done
-          test "$(curl -fsS http://127.0.0.1:18081/health)" = '{"status":"ok"}'
-          curl -fsS http://127.0.0.1:18081/ui/ | grep -q 'id="root"'
+          test "$(curl -fsS http://127.0.0.1:29081/health)" = '{"status":"ok"}'
+          curl -fsS http://127.0.0.1:29081/ui/ | grep -q 'id="root"'

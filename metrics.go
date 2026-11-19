@@ -72,6 +72,13 @@ func metricsSummaryHandler(w http.ResponseWriter, r *http.Request) {
 		return out
 	}
 
+	// Client-identification aggregates. These are the questions this service
+	// exists to answer: which clients hit us, how much of the traffic lies
+	// about its UA, and which TLS fingerprints we still cannot name.
+	var spoofed, unnamed int
+	_ = db.QueryRow(`SELECT COUNT(*) FROM query_log WHERE ts >= ? AND spoofed = 1`, sinceStr).Scan(&spoofed)
+	_ = db.QueryRow(`SELECT COUNT(*) FROM query_log WHERE ts >= ? AND client_name = ''`, sinceStr).Scan(&unnamed)
+
 	writeJSON(w, map[string]any{
 		"hours":         hours,
 		"since":         sinceStr,
@@ -82,15 +89,36 @@ func metricsSummaryHandler(w http.ResponseWriter, r *http.Request) {
 		"top_countries": group("country", 8),
 		"top_methods":   group("method", 8),
 		"by_connection": group("connection_type", 8),
+		"top_clients":   group("client_name", 10),
+		"by_family":     group("client_family", 8),
+		"top_ja4":       group("ja4", 8),
+		"spoofed":       spoofed,
+		"unnamed":       unnamed,
 	})
 }
 
 // prometheusHandler exposes the same counters in Prometheus text format so
 // the service can be scraped without an exporter.
 func prometheusHandler(w http.ResponseWriter, r *http.Request) {
-	initDB()
 	var mem runtime.MemStats
 	runtime.ReadMemStats(&mem)
+
+	// Lite mode has no database: emit the runtime and fast-path counters only.
+	if os.Getenv("ECHO_SERVER_LITE") == "1" || liteMode {
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		fmt.Fprintf(w, "# HELP echo_uptime_seconds Seconds since the process started\n"+
+			"# TYPE echo_uptime_seconds gauge\necho_uptime_seconds %d\n", int64(time.Since(serverStarted).Seconds()))
+		fmt.Fprintf(w, "# HELP echo_go_goroutines Active goroutines\n"+
+			"# TYPE echo_go_goroutines gauge\necho_go_goroutines %d\n", runtime.NumGoroutine())
+		fmt.Fprintf(w, "# HELP echo_memory_alloc_bytes Allocated Go heap bytes\n"+
+			"# TYPE echo_memory_alloc_bytes gauge\necho_memory_alloc_bytes %d\n", mem.Alloc)
+		fmt.Fprintf(w, "# HELP echo_ip_only_requests_total Fast /ip requests\n"+
+			"# TYPE echo_ip_only_requests_total counter\necho_ip_only_requests_total %d\n", ipOnlyRequests.Load())
+		return
+	}
+
+	initDB()
 	s := GetStats()
 	var apiKeys, webhooks, unread int
 	initExtraDB()
@@ -118,6 +146,7 @@ func prometheusHandler(w http.ResponseWriter, r *http.Request) {
 		{"echo_api_keys_enabled", "Enabled API keys", "gauge", int64(apiKeys)},
 		{"echo_webhooks_enabled", "Enabled webhooks", "gauge", int64(webhooks)},
 		{"echo_notifications_unread", "Unread console notifications", "gauge", int64(unread)},
+		{"echo_ip_only_requests_total", "Requests served by the fast /ip endpoint", "counter", int64(ipOnlyRequests.Load())},
 	}
 	for _, l := range lines {
 		fmt.Fprintf(w, "# HELP %s %s\n# TYPE %s %s\n%s %d\n", l.name, l.help, l.name, l.typ, l.name, l.value)

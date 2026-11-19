@@ -9,6 +9,63 @@ import (
 	"time"
 )
 
+// redactedHeaderNames are the request headers whose values are replaced when
+// echoing. Comparison is case-insensitive (canonical MIME header form).
+var redactedHeaderNames = []string{
+	"Authorization",
+	"Cookie",
+	"Set-Cookie",
+	"Proxy-Authorization",
+	"X-Api-Key",
+	"X-Api-Token",
+	"X-Auth-Token",
+	"X-Csrf-Token",
+}
+
+// redactValue replaces a credential with a stable placeholder that shows where
+// it came from without disclosing it: "***" plus the scheme/prefix so operators
+// can still tell "Bearer" from "Basic" while debugging.
+func redactValue(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return v
+	}
+	if i := strings.IndexByte(v, ' '); i > 0 && i <= 16 {
+		return v[:i] + " ***"
+	}
+	return "***"
+}
+
+// redactSensitiveHeaders returns a copy of headers with credential values
+// masked. The original map is untouched (it may be reused by the caller).
+func redactSensitiveHeaders(h map[string][]string) map[string][]string {
+	if len(h) == 0 {
+		return h
+	}
+	out := make(map[string][]string, len(h))
+	for k, vals := range h {
+		canon := http.CanonicalHeaderKey(k)
+		hit := false
+	cmp:
+		for _, name := range redactedHeaderNames {
+			if canon == name {
+				hit = true
+				break cmp
+			}
+		}
+		if !hit {
+			out[k] = vals
+			continue
+		}
+		masked := make([]string, len(vals))
+		for i, v := range vals {
+			masked[i] = redactValue(v)
+		}
+		out[k] = masked
+	}
+	return out
+}
+
 // buildEchoResponse is the pure, testable core that builds the EchoResponse
 // from a request and optional TLS state. It is separated from the HTTP wiring
 // so unit tests can call it directly.

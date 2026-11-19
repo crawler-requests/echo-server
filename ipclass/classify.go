@@ -179,7 +179,7 @@ var dcOrgKeywords = []string{
 	"digitalocean", "ovh", "hetzner", "linode", "akamai", "cloudflare",
 	"fastly", "vultr", "scaleway", "alibaba", "alicloud", "tencent",
 	"qcloud", "huawei cloud", "kingsoft", "ucloud", "oracle", "ibm cloud",
-	"softlayer", "rackspace", "bytedance", "sakura", "colo", "hosting",
+	"softlayer", "rackspace", "bytedance", "sakura", "colocation", "hosting",
 	"datawagon", "leaseweb", "hivelocity", "contabo", "ionos", "gandi",
 	"interserver", "servers.com", "ovhcloud", "2cloud", "zenlayer",
 }

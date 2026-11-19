@@ -40,9 +40,10 @@ const FIELDS = [
   { field: 'asn / org', desc: '自治系统号与运营组织，用于识别云厂商、机房或住宅宽带。' },
   { field: 'country / country_code', desc: '国家名称与 ISO 两位代码，日志筛选与聚合的主维度。' },
   { field: 'region / city / postal', desc: '省州、城市与邮编；精度取决于数据源，可能为空。' },
-  { field: 'latitude / longitude', desc: '经纬度，仅在线高精度来源返回；离线模式留空。' },
+  { field: 'latitude / longitude', desc: '经纬度，仅在线来源返回；城市级近似坐标，不代表街道位置。' },
   { field: 'timezone / utc_offset', desc: 'IANA 时区与 UTC 偏移，便于还原调用方本地时间。' },
-  { field: 'connection_type', desc: 'datacenter / residential_proxy / unknown，由本地 CIDR 表与隐私标签共同判定。' },
+  { field: 'anycast', desc: '任播地址标记（目前来自 ipinfo.io）；为 true 时城市字段没有地理意义，不应作为定位依据。' },
+  { field: 'connection_type', desc: 'datacenter / residential_proxy / unknown，由本地 CIDR 表与隐私标签共同判定；residential_proxy 也覆盖 VPN/Tor 出口。' },
   { field: 'geo_source', desc: '实际命中的 Provider 或 local；用于确认数据可信度。' },
 ];
 
@@ -216,7 +217,7 @@ const IPIntel: React.FC = () => {
                   { value: 'auto', label: '自动 · 按优先级尝试全部已启用 Provider' },
                   { value: 'ipwhois', label: 'ipwho.is · 免费，含经纬度' },
                   { value: 'ipapi', label: 'ip-api.com · 免费，含经纬度' },
-                  { value: 'ipinfo', label: 'ipinfo.io · Token 时高精度 + 隐私标签' },
+                  { value: 'ipinfo', label: 'ipinfo.io · Token 时更细坐标 + 隐私标签' },
                   { value: 'offline', label: '离线 · 仅本地 CIDR 表' },
                 ]}
               />
@@ -231,7 +232,7 @@ const IPIntel: React.FC = () => {
                   <div className="setting-tile" style={{ display: 'block', height: '100%' }}>
                     <div>
                       <div className="s-title"><CloudDownloadOutlined style={{ marginRight: 6 }} />缓存策略</div>
-                      <div className="s-desc">相同 IP 在 TTL 内复用结果，避免免费接口被限流；回显主流程不会因为上游变慢而阻塞。</div>
+                      <div className="s-desc">相同 IP 在 TTL 内复用结果，避免免费接口被限流；未命中缓存时地理查询是同步的，上游超时会延长本次回显响应。</div>
                       <div style={{ marginTop: 10 }}>
                         <Text type="secondary">当前 TTL：</Text>
                         <Text strong>{Number(cfg.geo_cache_ttl) || 24} 小时</Text>
@@ -297,7 +298,7 @@ const IPIntel: React.FC = () => {
               <Input.Password
                 disabled={!canEdit}
                 value={cfg.ipinfo_token || ''}
-                placeholder="启用街区级经纬度与 proxy / vpn / tor 标签"
+                placeholder="启用 ipinfo 的 loc 与 proxy / vpn / tor 标签"
                 onChange={e => setCfg(prev => ({ ...prev, ipinfo_token: e.target.value }))}
               />
               <p className="section-note">Token 不会返回给只读账号；管理接口中显示为 ***。</p>
@@ -322,7 +323,7 @@ const IPIntel: React.FC = () => {
               <div className="setting-tile" style={{ background: '#f8fafc' }}>
                 <div>
                   <div className="s-title"><CloudDownloadOutlined style={{ marginRight: 8 }} />降级策略</div>
-                  <div className="s-desc">某个来源限流、超时或无结果时，链路自动尝试下一个 Provider，不影响回显主流程。</div>
+                  <div className="s-desc">某个来源限流、超时或无结果时，链路自动尝试下一个 Provider，回显仍会正常返回，只是耗时增加、字段可能为空。</div>
                 </div>
               </div>
             </Card>

@@ -75,6 +75,7 @@ type Info struct {
 	IsVPN       *bool   `json:"is_vpn,omitempty"`
 	IsTor       *bool   `json:"is_tor,omitempty"`
 	IsHosting   *bool   `json:"is_hosting,omitempty"`
+	Anycast     *bool   `json:"anycast,omitempty"`
 	Source      string  `json:"source,omitempty"` // provider name that supplied this answer
 }
 
@@ -84,6 +85,8 @@ func (i *Info) Usable() bool {
 	if i == nil {
 		return false
 	}
+	// An anycast-only answer is not enough to stop the chain; it is useful as a
+	// flag on top of real location/ASN data, not as a substitute for it.
 	return i.Country != "" || i.CountryCode != "" || i.Region != "" || i.City != "" ||
 		i.Postal != "" || i.Timezone != "" || i.Latitude != 0 || i.Longitude != 0 ||
 		i.ASN != "" || i.ASNName != "" || i.Org != "" || i.ISP != "" ||
@@ -736,6 +739,8 @@ func setField(info *Info, field string, v any) {
 		info.IsTor = valueBool(v)
 	case "is_hosting":
 		info.IsHosting = valueBool(v)
+	case "anycast", "is_anycast":
+		info.Anycast = valueBool(v)
 	}
 }
 

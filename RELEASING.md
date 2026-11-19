@@ -20,10 +20,15 @@ is designed so a release is a repeatable 15-minute operation.
    - CI on `main` must be green.
 2. **Update the changelog**
    - Move `[Unreleased]` entries into a new `[x.y.z] - YYYY-MM-DD` section and update the links.
-3. **Tag and push**
+3. **Tag and push** (two independent releases)
    ```bash
+   # full product (console, database, admin API)
    git tag -a v1.0.0 -m "v1.0.0"
    git push origin v1.0.0
+
+   # lite build (no database; /ip and /echo only) — separate tag namespace
+   git tag -a lite-v1.0.0 -m "lite-v1.0.0"
+   git push origin lite-v1.0.0
    ```
 4. **Watch the release workflow**
    ```bash
@@ -34,6 +39,8 @@ is designed so a release is a repeatable 15-minute operation.
    - Download one archive, extract it into an empty directory, run `./echo-server`, check
      `http://HOST:8080/ui/` and `GET /api/system` (`version` = tag, `build_commit` = tagged commit).
    - `sha256sum -c checksums.txt` inside the release download directory.
+   - **Lite release**: download `echo-server-lite_*`, run it with `ECHO_SERVER_LITE=1`, confirm
+     `/ip` answers, `/ui/` and `/api/config` are 404, and no `echo.db` appears next to the binary.
 6. **Post-release**
    - Announce in the project README/discussions if applicable.
    - Bump `serverVersion`'s development default only if the project starts cutting maintenance

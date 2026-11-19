@@ -124,6 +124,33 @@ func TestBuildEchoResponse_HeadersAndBody(t *testing.T) {
 	}
 }
 
+func TestRedactSensitiveHeaders(t *testing.T) {
+	in := map[string][]string{
+		"Authorization": {"Bearer supersecret-token"},
+		"Cookie":        {"session=abc123"},
+		"X-Api-Key":     {"esk_abcdef"},
+		"User-Agent":    {"curl/8"},
+		"X-Custom":      {"value"},
+	}
+	out := redactSensitiveHeaders(in)
+	if got := out["Authorization"][0]; got != "Bearer ***" {
+		t.Errorf("Authorization = %q, want Bearer ***", got)
+	}
+	if got := out["Cookie"][0]; got != "***" {
+		t.Errorf("Cookie = %q, want ***", got)
+	}
+	if got := out["X-Api-Key"][0]; got != "***" {
+		t.Errorf("X-Api-Key = %q, want ***", got)
+	}
+	if out["User-Agent"][0] != "curl/8" || out["X-Custom"][0] != "value" {
+		t.Errorf("non-sensitive headers were altered: %+v", out)
+	}
+	// The input map must not be mutated (callers may reuse it).
+	if in["Authorization"][0] != "Bearer supersecret-token" {
+		t.Fatal("redactSensitiveHeaders mutated its input")
+	}
+}
+
 func TestExtractClientIP_XForwardedFor(t *testing.T) {
 	req := httptest.NewRequest("GET", "/", nil)
 	req.Header.Set("X-Forwarded-For", "203.0.113.42, 70.41.3.18")

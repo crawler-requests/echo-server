@@ -103,7 +103,12 @@ func checkIP(ipStr string) (bool, string) {
 
 // allowRate returns true when the request is within the per-minute budget.
 // A limit of 0 disables the limiter.
-func allowRate(ip string) bool {
+//
+// Two buckets are charged: the address the client claims (X-Forwarded-For or
+// the TCP peer) and the TCP peer itself. Charging the peer prevents a client
+// from rotating a spoofed X-Forwarded-For value to escape the limit while
+// still giving each real client behind a proxy its own budget.
+func allowRate(ip, peer string) bool {
 	limit, _ := strconv.Atoi(GetConfig("rate_limit_per_min"))
 	if limit <= 0 {
 		return true
@@ -118,17 +123,114 @@ func allowRate(ip string) bool {
 			}
 		}
 	}
-	b := rateState.buckets[ip]
-	if b == nil || now.After(b.reset) {
-		rateState.buckets[ip] = &rateBucket{count: 1, reset: now.Add(time.Minute)}
-		return true
+	keys := []string{"client:" + ip}
+	if peer != "" && peer != ip {
+		keys = append(keys, "peer:"+peer)
 	}
-	if b.count >= limit {
-		return false
+	// Charge every key or none: checking first keeps a rejected request from
+	// spending the other bucket's budget.
+	for _, k := range keys {
+		if b := rateState.buckets[k]; b != nil && !now.After(b.reset) && b.count >= limit {
+			return false
+		}
 	}
-	b.count++
+	for _, k := range keys {
+		b := rateState.buckets[k]
+		if b == nil || now.After(b.reset) {
+			rateState.buckets[k] = &rateBucket{count: 1, reset: now.Add(time.Minute)}
+			continue
+		}
+		b.count++
+	}
 	return true
 }
+
+// tcpPeer returns the connection's real peer address, ignoring forwarding
+// headers. Used as the anti-spoofing anchor for rate limiting and login
+// throttling.
+func tcpPeer(r *http.Request) string {
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return host
+	}
+	return r.RemoteAddr
+}
+
+// Credential endpoints (login / setup / register) are not echo traffic, so the
+// operator's echo limiter never covered them. They get a separate, always-on
+// budget per TCP peer: the peer address is not client-controlled, so rotating
+// X-Forwarded-For does not reset it.
+const (
+	authFailWindow   = 15 * time.Minute
+	authFailLimit    = 10 // failed attempts per peer per window
+	authAttemptLimit = 30 // total attempts per peer per window
+)
+
+var authThrottle = struct {
+	sync.Mutex
+	peers map[string]*authPeerState
+}{peers: map[string]*authPeerState{}}
+
+type authPeerState struct {
+	attempts int
+	failures int
+	window   time.Time
+}
+
+// authThrottleAllow meters one credential attempt. It returns ok=false with a
+// retry-after when the peer has spent its budget.
+func authThrottleAllow(peer string) (bool, time.Duration) {
+	now := time.Now()
+	authThrottle.Lock()
+	defer authThrottle.Unlock()
+	if len(authThrottle.peers) > 20000 {
+		for k, st := range authThrottle.peers {
+			if now.After(st.window) {
+				delete(authThrottle.peers, k)
+			}
+		}
+	}
+	st := authThrottle.peers[peer]
+	if st == nil || now.After(st.window) {
+		authThrottle.peers[peer] = &authPeerState{attempts: 1, window: now.Add(authFailWindow)}
+		return true, 0
+	}
+	if st.failures >= authFailLimit || st.attempts >= authAttemptLimit {
+		return false, time.Until(st.window)
+	}
+	st.attempts++
+	return true, 0
+}
+
+// authThrottleRecord records the outcome so only failures burn the tighter
+// failure budget (a busy legitimate user is not locked out by successful logins).
+func authThrottleRecord(peer string, failed bool) {
+	if !failed {
+		return
+	}
+	authThrottle.Lock()
+	defer authThrottle.Unlock()
+	if st := authThrottle.peers[peer]; st != nil {
+		st.failures++
+	}
+}
+
+// authThrottleMiddleware guards login/setup/register with the always-on budget.
+func authThrottleMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if ok, retry := authThrottleAllow(tcpPeer(r)); !ok {
+			secs := int(retry.Seconds()) + 1
+			w.Header().Set("Retry-After", strconv.Itoa(secs))
+			http.Error(w, "too many credential attempts; retry later", http.StatusTooManyRequests)
+			return
+		}
+		next(w, r)
+	}
+}
+
+// defaultEchoBodyLimit bounds the echo request body when the operator left
+// body_limit_kb at 0. The echo handler reads the whole body into memory, so an
+// unset cap is a memory-exhaustion vector; 8 MB is generous for real use.
+const defaultEchoBodyLimit = 8 << 20
 
 // isEchoTraffic identifies requests that belong to the public echo surface
 // rather than the console, its APIs, health checks or metrics.
@@ -183,7 +285,10 @@ func securityMiddleware(next http.Handler) http.Handler {
 				http.Error(w, reason, http.StatusForbidden)
 				return
 			}
-			if !allowRate(ip) {
+			// The peer bucket makes a revolving X-Forwarded-For useless as a
+			// limiter bypass; the claimed-IP bucket keeps per-client fairness
+			// behind a proxy.
+			if !allowRate(ip, tcpPeer(r)) {
 				w.Header().Set("Retry-After", "60")
 				http.Error(w, "too many requests", http.StatusTooManyRequests)
 				return
@@ -198,6 +303,12 @@ func securityMiddleware(next http.Handler) http.Handler {
 
 		if kb, _ := strconv.Atoi(GetConfig("body_limit_kb")); kb > 0 && r.Body != nil {
 			r.Body = http.MaxBytesReader(w, r.Body, int64(kb)*1024)
+		} else if r.Body != nil && isEchoTraffic(r) {
+			// Even with no operator cap, bound the echo body: reading it with
+			// io.ReadAll into memory means an unbounded body is a trivial
+			// memory-exhaustion vector. 8 MB is far above any request a client
+			// would want echoed back (logs show typical bodies are KBs).
+			r.Body = http.MaxBytesReader(w, r.Body, defaultEchoBodyLimit)
 		}
 
 		next.ServeHTTP(w, r)

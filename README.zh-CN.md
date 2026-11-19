@@ -9,7 +9,7 @@
 
 用于爬虫调试的 HTTPS 回显服务：回显请求头/请求体、**完整的 TLS ClientHello**（原始字节、SNI、ALPN、
 密码套件、扩展、JA3 **以及 JA4 / JA4_r / JA4_o**）、**识别调用方客户端**（curl / python-requests /
-Node / Java / Go / OpenSSL / Chrome / ……，并检测 UA 伪装），以及客户端公网 IP 的 **ASN + 高精度地理
+Node / Java / Go / OpenSSL / Chrome / ……，并检测 UA 伪装），以及客户端公网 IP 的 **ASN + 城市级地理
 位置**（国家/地区/城市/邮编/经纬度）和**连接类型**（`datacenter` / `residential_proxy` / `unknown`）。
 
 ClientHello 捕获按连接隔离且**抗分片**：字节会跨多次 TCP 读取与握手记录累积，直到完整 hello 可用，
@@ -18,6 +18,126 @@ ClientHello 捕获按连接隔离且**抗分片**：字节会跨多次 TCP 读�
 单一 Go 二进制；通过 `//go:embed` 内嵌 React + Ant Design 管理控制台（`/ui/`）；SQLite 存储配置、查询
 历史与用户账号（`admin` / `viewer`，PBKDF2-SHA256 密码，JWT 会话）、命名 API Key、审计日志、通知、
 Webhook、日志筛选视图、Prometheus 指标与 OpenAPI 文档。
+
+**极速版**：同一二进制以 `ECHO_SERVER_LITE=1` 启动即进入极速模式——完全不使用数据库，只提供 `/ip`
+（返回出网 IP）与 `/echo`。实测 **10 万并发连接、0 失败、230k+ rps**（32 核机器）。详见
+[极速版与并发](#极速版与并发)。
+
+---
+
+## 可直接复制给 AI agent 的提示词
+
+以下提示词可以直接粘贴给 **Claude Code**、**Codex**、Cursor 或任何有 shell 权限的 agent，让它完成
+安装、启动、验证乃至部署。每条提示词都内置了**验收测试**，agent 能据此判断"做完了"，而不是靠猜。
+
+### 1. 部署完整产品并验证（Claude Code / Codex / 任意 shell agent）
+
+```text
+在这台机器上部署 echo-server 服务并端到端验证。
+
+步骤：
+1. 从 https://github.com/crawler-requests/echo-server/releases/latest 下载本 OS/arch 的最新 release
+   （产物命名：echo-server_<version>_<os>_<arch>.tar.gz，Windows 为 .zip）。
+   对照 checksums.txt 校验后解压。
+2. 启动：ECHO_SERVER_DB=./echo.db ECHO_SERVER_ADMIN_USERNAME=admin \
+        ECHO_SERVER_ADMIN_PASSWORD='<随机强密码>' PORT=8443 HTTP_PORT=8080 ./echo-server
+   用 nohup/systemd 托管，并确认进程存活 10 秒。
+3. 验收测试——全部通过才算完成：
+   - curl -sf http://127.0.0.1:8080/health            -> {"status":"ok"}
+   - curl -sf http://127.0.0.1:8080/ip                -> 含 "ip" 的 JSON
+   - curl -sf http://127.0.0.1:8080/ip?format=text    -> 一个纯 IP
+   - curl -sf -k https://127.0.0.1:8443/echo | head   -> 含 "headers" 与 "client_hello" 的 JSON
+   - curl -sf -k -H 'User-Agent: curl/8.5.0' https://127.0.0.1:8443/echo?fields=client
+                                                      -> "client.name" 为 curl（或同类）
+   - curl -sf http://127.0.0.1:8080/ui/ | grep 'id="root"'   -> 控制台页面可加载
+   - 用管理员凭据 POST /api/login 能拿到 JWT。
+4. 打印控制台 URL（http://<lan-ip>:8080/ui/）与管理员用户名。
+汇报：执行的命令、每项测试输出、URL。任何一项失败都要先修好再汇报。
+```
+
+### 2. 为代理/出网池部署极速版（无数据库）
+
+```text
+部署 echo-server 极速版，它是一个无状态的"我的出网 IP 是什么"端点。
+
+步骤：
+1. 下载极速版 release：tag 前缀 `lite-v`，产物
+   echo-server-lite_<version>_<os>_<arch>.tar.gz，校验 checksums 后解压。
+2. 完全不使用数据库启动：
+     ECHO_SERVER_LITE=1 PORT=8443 HTTP_PORT=8080 ./echo-server-lite
+3. 验收测试——全部通过才算完成：
+   - curl -sf http://127.0.0.1:8080/ip                -> 含 "ip" 的 JSON
+   - curl -sf http://127.0.0.1:8080/ip?format=text    -> 一个纯 IP
+   - curl -sf http://127.0.0.1:8080/echo?fields=ip.ip -> 含 ip 的 JSON
+   - curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/ui/        -> 404
+   - curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/api/config -> 404
+   - 工作目录中不出现 *.db / *.db-wal 文件。
+   - 连续 1000 次请求全部返回 200（循环 curl -sf）。
+4. 提高文件句柄上限（ulimit -n 1048576）并在汇报中注明——这是它能承载约 10 万连接的前提。
+汇报 URL、通过 /ip 拿到的 IP，并确认"无数据库"这一性质。
+```
+
+### 2b. 在本机验证"10 万并发"这一声明
+
+这是一条可选验证提示词：它用仓库自带的压测工具（`tools/loadtest`）实测，而不是相信 README 里的表格。
+
+```text
+验证 echo-server 极速版在这台机器上真的能承载 10 万个并发连接。
+
+1. 启动：ECHO_SERVER_LITE=1 PORT=8443 HTTP_PORT=8080 ./echo-server &
+   （或在代码仓库里 go run .）
+2. 应用测试所需的内核限制：
+     sudo sysctl -w net.core.somaxconn=65535 net.ipv4.tcp_max_syn_backlog=65535
+     sudo sysctl -w net.ipv4.ip_local_port_range="1024 65535"
+     ulimit -n 1048576
+3. 把客户端源端口分散到多个回环地址（单个源 IP 只有约 6.4 万个出站端口，这是客户端限制）：
+     for ip in 127.0.0.2 127.0.0.3 127.0.0.4 127.0.0.5; do sudo ip addr add $ip/8 dev lo; done
+4. 保持连接：
+     go run ./tools/loadtest -mode hold -c 100000 -addr 127.0.0.1:8080 \
+       -la 127.0.0.1,127.0.0.2,127.0.0.3,127.0.0.4,127.0.0.5 -d 20s
+   验收：dialed==100000、failed==0。运行期间读取服务端 RSS（ps -o rss），约为每连接 7-8 KB。
+5. 在同一批 10 万连接上持续发请求：
+     go run ./tools/loadtest -mode drive -c 100000 -path /ip -addr 127.0.0.1:8080 \
+       -la 127.0.0.1,127.0.0.2,127.0.0.3,127.0.0.4,127.0.0.5 -d 12s
+   验收：dialed==100000、failed==0、errs==0，且 rps > 100000。
+6. 清理：删除额外的回环地址（sudo ip addr del ...）并停止服务。
+汇报：两次运行的 dialed/failed/requests/rps、实测 RSS，以及本机核数。
+若 failed 非 0，先报告客户端侧错误——几乎总是源端口耗尽或 ulimit 过低，而非服务端问题。
+```
+
+### 3. 跑测试套件 / 贡献改动
+
+```text
+在 echo-server 仓库上工作（Go + React，单二进制）。
+
+1. 安装 Go 1.26+ 与 Node 22。
+2. make build        # 构建 frontend/dist 并通过 //go:embed 内嵌
+3. 运行验收门槛，任何失败都要修：
+     gofmt -l .            （必须无输出）
+     go vet ./...
+     go test ./... -race -count=1
+4. 做你的改动，重跑完整门槛，并补一个"没有该改动就会失败"的测试。
+5. 验证运行中的二进制，而不只是单元测试：
+     PORT=18443 HTTP_PORT=18080 ./echo-server &
+     curl -sf http://127.0.0.1:18080/ip
+     curl -sf -k https://127.0.0.1:18443/echo?fields=ja4,tls,client
+汇报：diff 摘要、门槛输出、手工 curl 输出。
+```
+
+### 4. 审查这个服务能告诉你关于客户端的哪些信息
+
+```text
+启动 echo-server，用多种客户端探测，观察指纹面。
+
+1. 构建并运行：make build && PORT=8443 HTTP_PORT=8080 ./echo-server &
+2. 对以下每个客户端，抓取 /echo?fields=client,ja4,tls,http2,ip 的响应，汇总 name、family、
+   JA4、HTTP/2 指纹与 UA 伪装检测结果：
+     curl、wget、python -c 'import requests; requests.get(...)'、node、go net/http、
+     一个伪造 Chrome User-Agent 的 curl。
+3. 确认：curl 伪造 Chrome UA 会被标记 "spoofed": true，且 Go 客户端缺失 http2 指纹这一点
+   能与 curl 区分开。
+4. 汇报一张表：客户端 -> 识别出的 name/family -> JA4 -> h2 指纹 -> 是否伪造。
+```
 
 ## 运行
 
@@ -49,6 +169,73 @@ docker run -d --name echo-server \
 
 镜像基于精简的 Alpine 运行时，内部是同一个自包含二进制（含 CA 根证书与 tzdata）；SQLite 数据库位于
 `/data` 卷。若不设置 `ECHO_SERVER_ADMIN_*`，可通过 `/ui/` 的首次初始化向导创建管理员。
+
+## 极速版与并发
+
+`ECHO_SERVER_LITE=1` 让二进制进入极速模式：**无 SQLite、无用户、无数据集、无管理 API、无查询日志**。
+只提供 `/ip`、`/echo`、`/health`、`/metrics`，其余一律 404。适合挂代理池、爬虫集群或出网校验。
+
+| 模式 | 并发 | 吞吐 | 失败数 | 服务端 CPU |
+|---|---|---|---|---|
+| 极速 `/ip` | 1,000 | 217k rps | 0 | 约 2 核 |
+| 极速 `/ip` | 10,000 | 298k rps | 0 | 约 2 核 |
+| 极速 `/ip` | 50,000 | 221k rps | 0 | 约 2 核 |
+| 极速 `/ip` | **100,000** | **230k–256k rps** | **0** | **约 2 核** |
+
+10 万个**同时保持**的连接占用 **713 MB RSS**（每连接约 7.1 KB），零建连失败；在这 10 万连接上持续
+发请求达到 **231k rps、零错误**。同一次压测中压测客户端需要 13 核以上，因此这些数字受限于客户端而非
+服务端。
+
+### 自行复现
+
+压测工具就在仓库里（`tools/loadtest`），上面的数字可验证而非空口声明：
+
+```bash
+# 内核限制（服务端与客户端）
+sudo sysctl -w net.core.somaxconn=65535 net.ipv4.tcp_max_syn_backlog=65535
+sudo sysctl -w net.ipv4.ip_local_port_range="1024 65535"   # 仅客户端侧
+ulimit -n 1048576
+
+# 1) 启动极速版
+ECHO_SERVER_LITE=1 PORT=8443 HTTP_PORT=8080 ./echo-server &
+
+# 2) 保持 10 万连接（测每连接内存）
+go run ./tools/loadtest -mode hold -c 100000 -addr 127.0.0.1:8080 \
+  -la 127.0.0.1,127.0.0.2,127.0.0.3,127.0.0.4,127.0.0.5 -d 20s
+
+# 3) 在 10 万连接上持续发请求（测吞吐）
+go run ./tools/loadtest -mode drive -c 100000 -path /ip -addr 127.0.0.1:8080 \
+  -la 127.0.0.1,127.0.0.2,127.0.0.3,127.0.0.4,127.0.0.5 -d 12s
+```
+
+单个源 IP 的本机源端口只有约 6.4 万个，所以压测时把客户端分散到 5 个回环地址（`-la`）；而**承载**
+10 万**入站**连接只需要上面的服务端限制——真实客户端集群各自一个源 IP 即可达到。
+
+## 极速版：`/ip`
+
+如果只需要**调用方的出网 IP**，就不该为完整回显的全部开销买单（ClientHello 解析、JA3/JA4/JA4H/h2
+指纹、客户端识别、地理查询、日志写入）。`GET /ip` 只回答这一个问题：
+
+```bash
+curl -k https://HOST:8443/ip                   # {"ip":"203.0.113.42"}
+curl -k https://HOST:8443/ip?format=text       # 203.0.113.42
+curl -k http://HOST:8080/ip                    # 明文监听，完全不走 TLS
+```
+
+它和 `/echo` 一样遵循 `X-Forwarded-For` / `X-Real-IP` / `CF-Connecting-IP`，返回
+`Cache-Control: no-store`，并在 `/metrics` 中计入 `echo_ip_only_requests_total`。它**刻意不写查询日志**，
+因此代理池健康检查不会把控制台历史刷爆。
+
+32 核机器实测（回环、明文 HTTP、`ab -k` 与 Go 压测工具）：
+
+| 端点 | 并发 | 吞吐 | p50 | p99 |
+|---|---|---|---|---|
+| `/ip` | 1,000 | **127k rps** | 0.8 ms | 38 ms |
+| `/ip` | 5,000 | 102k rps | 44 ms | 182 ms |
+| `/echo`（完整） | 1,000 | 53k rps（明文）/ 29k（TLS） | 5.8 / 4.6 ms | 145 / 515 ms |
+
+2000 并发时服务端只用了约 2.5 核，而压测客户端需要 13 核，因此上表受限于客户端而非服务端。真实远端
+客户端还要加上网络 RTT 与 TLS 握手开销；表中反映的是 keep-alive 复用连接的情况（所有池化爬虫都是这样）。
 
 ## 回显端点 — 请求级控制
 
@@ -128,7 +315,13 @@ curl -k 'https://HOST:8443/echo?fields=client.name,client.family,client.spoofed,
 
 - **JA4 指纹库** —— 一个可嵌入/可插拔的真实世界 JA4 指纹库，把 ClientHello 映射到实际发送它的
   客户端。与服务端所有数据集一样，它由按优先级排序的 Provider 组装（见
-  [数据源引擎](#数据源引擎provider)），内嵌 JA4DB 快照始终是最后的兜底。
+  [数据源引擎](#数据源引擎provider)），内嵌的融合库始终是最后的兜底。
+
+  内嵌库本身就是融合产物：JA4DB 众包快照（每个指纹实际伴随哪些 User-Agent）**加上** FoxIO 的人工
+  映射（任何提交库都不包含的应用名——Cobalt Strike、Sliver、Qakbot、IcedID、Lumma、Pikabot、
+  Darkgate、ngrok、SoftEther）。人工维护的恶意软件命中会标为 `family: "malware"`，隧道/VPN 工具标为
+  `family: "tunnel"`，且每个命中都带上其提交记录里的 OS/库上下文（`client.os`、`client.library`、
+  `client.fused`）。
 
   查找时从高优先级到低优先级遍历 Provider，先精确匹配 JA4，再匹配 JA4 前缀（head + cipher hash，
   浏览器跨版本保持不变）。第一个认识该指纹的 Provider 胜出，因此私有库或云端同步库可以覆盖快照中
@@ -239,7 +432,7 @@ JA4 云端契约就是 `tools/ja4dbgen` 写出的 `{meta, ja4}` JSON ——
 
 已是归一化结构的响应（`country`、`country_code`、`region`、`city`、`postal`、`timezone`、
 `utc_offset`、`latitude`、`longitude`、`continent`、`asn`、`asn_name`、`org`、`isp`、`is_proxy`、
-`is_vpn`、`is_tor`、`is_hosting`）无需映射。其他 API 用 `mapping` 描述（Info 字段 → 点路径，支持数组
+`is_vpn`、`is_tor`、`is_hosting`、`anycast`）无需映射。其他 API 用 `mapping` 描述（Info 字段 → 点路径，支持数组
 下标）：`{"country":"data.location.country_name","latitude":"data.location.lat","asn":"data.asn"}`。
 `headers` 携带凭据；与数据集一样，它们在所有 API 响应中都会被掩码（`***`），把掩码原样提交回去会
 保留已存的值。每个 Provider 的统计（调用、成功、失败、平均延迟、最后错误、最后成功）通过 API/UI
@@ -287,14 +480,76 @@ curl -k -X DELETE -H "Authorization: Bearer $JWT" 'https://HOST:8443/api/ipprovi
 Go `http.Server` 强制的：哈希前请求头**名称会排序**（线上顺序无法从 `http.Header` 恢复，且 `Host`
 位于 `r.Host` 而非 header map）；cookie 字段/值哈希与参考实现逐字节一致。
 
-### 重新生成 `data/ja4db.json`
+### HTTP/2 指纹
 
-内嵌数据库由镜像在 `github.com/Niicolaa/ja4db-export` 的 JA4DB 冻结公共 API 快照生成（该项目在
-2026 年 API 关闭前每天重新发布数据）：刷新快照后，可用以下命令重建压缩后的 JSON
+TLS 伪装工具（curl_cffi、uTLS）能把 JA3/JA4 抄得一模一样，所以 HTTP/2 层才是下一个区分维度：浏览器与
+各 HTTP 库发送的 SETTINGS、是否使用 PRIORITY 帧、请求伪头的顺序都不一样。连接协商为 h2 时，回显响应会
+带上 `http2` 对象：
+
+```json
+{
+  "http2": {
+    "raw": "3:100,4:10485760,2:0|:method,:scheme,:authority,:path",
+    "settings": "3:100,4:10485760,2:0",
+    "pseudo_header_order": [":method", ":scheme", ":authority", ":path"],
+    "stream_id": 1
+  }
+}
+```
+
+`raw` 是广泛使用的 Akamai 风格指纹：`SETTINGS|PRIORITY|PSEUDO_HEADERS`。服务端自行运行
+`golang.org/x/net/http2`，从原始连接上旁路记录 SETTINGS 与 PRIORITY 帧（Go `net/http` 会丢弃它们）；
+请求处理（mux、鉴权、中间件、回显）保持不变。HTTP/1.x 连接没有 `http2` 对象；`enable_http2=false`
+可把监听器固定为只支持 HTTP/1.1（该值在构建 TLS 配置时读取，重启后生效）。
+
+同一实例实测：curl 发出 `3:100,4:10485760,2:0|:method,:scheme,:authority,:path`，而 Go 的 `net/http`
+发出 `2:0,4:4194304,5:16384,6:10485760|:authority,:method,:path,:scheme`——SETTINGS 顺序与伪头顺序都不同。
+
+### 凭据请求头默认脱敏
+
+回显接口通常允许任何人访问，原样回显请求头会把每次请求都变成凭据泄露（日志、截图、分享的 curl
+输出）。`redact_sensitive_headers`（默认**开启**）把 `Authorization`、`Cookie`、`Set-Cookie`、
+`Proxy-Authorization`、`X-Api-Key`、`X-Api-Token`、`X-Auth-Token`、`X-Csrf-Token` 的值替换为 `***`
+（`Bearer ***` 保留认证方案，便于区分 Bearer 与 Basic）。仅在调试令牌链路时于「回显设置」关闭。
+
+### 运维说明
+
+- **优雅关闭**：收到 `SIGINT`/`SIGTERM` 后停止接收新连接，最多 15 秒等完在途请求（可能正在等地理
+  查询或大上传），关闭 SQLite 后退出。
+- **回显请求体上限**：即使 `body_limit_kb=0` 也有 8MB 硬上限，因为处理逻辑会把整个 body 读进内存；
+  需要更严格可把 `body_limit_kb` 设小。
+- **限流与 IP 规则**同时按声明的客户端地址（`X-Forwarded-For`）与 TCP 对端计费，轮换伪造的请求头
+  无法逃逸每分钟配额或允许列表。
+- **登录 / 初始化 / 注册**按 TCP 对端限流（15 分钟内 10 次失败或 30 次尝试），始终开启，与
+  `rate_limit_per_min` 无关。
+- **SQLite 索引**：`query_log` 按 `ts`、`ip`、`(connection_type, country)` 建索引；`audit_log` 按
+  `ts`、`username`、`action`；另有 `notifications(read, ts)`、`api_keys(key_hash)`、
+  `webhooks(enabled)`、`saved_views(page)`。`TestQueryLogIndexesAreUsed` 断言查询计划确实命中它们。
+
+### 重新生成 `data/ja4db.json`（多源融合）
+
+内置库是**两个来源的融合**，因为各自覆盖了对方缺失的部分：
+
+| 来源 | 贡献 |
+|---|---|
+| JA4DB 冻结快照（2026-05-15，镜像自 `github.com/Niicolaa/ja4db-export`） | 1,589 个指纹、约 32 万次真实提交：某指纹实际伴随哪些 User-Agent，以及 OS/库信息 |
+| FoxIO `ja4plus-mapping.csv`（`github.com/FoxIO-LLC/ja4`） | 人工维护的应用名——包含任何提交库都没有的恶意软件 C2 与隧道工具：Cobalt Strike、Sliver、Qakbot、IcedID、Lumma、Pikabot、Darkgate、SoftEther、ngrok、Telegram |
+
+一条命令重建两个来源：
 
 ```bash
-go run ./tools/ja4dbgen -in /path/to/ja4_fingerprint.csv    # 默认输出：data/ja4db.json
+go run ./tools/ja4dbgen                      # 自动下载两个镜像并写出 data/ja4db.json
+go run ./tools/ja4dbgen -ja4db X.csv -mapping Y.csv   # 或使用本地文件
 ```
+
+生成器把 JA4DB 快照固定到最后一个完整导出的 commit（`4e46ad5b4401`）：可变的 `@main` 现在只提供
+596 个指纹的截断文件，而该 commit 有完整的 1,633 个。人工维护的名称按该指纹的提交量加权，使人工核实
+的恶意软件指纹可见，同时不会盖过真实流量。输出保持 `{meta, ja4}` 契约，因此任何说同一 JSON 的自定义
+Provider（file/remote/command）都能原样叠加。
+
+融合效果在输出里可见：仅由人工库命名的指纹（`t13d201100_…` → IcedID，423 次观测；`t12d190800_…` →
+Cobalt Strike beacon；`t13i190800_…` → Sliver Agent）能被识别，`family` 为 `malware`，且每个指纹都
+携带其提交记录里的 OS/库上下文。
 
 ## ClientHello 指纹
 
@@ -327,6 +582,7 @@ PBKDF2-SHA256（21 万次迭代）存储。JWT 签名密钥来自 `ECHO_SERVER_J
 |---|---|---|
 | 概览 | `/ui/` | 计数器、24h 趋势、最新通知、快捷操作、Provider 健康 |
 | 回显设置 | `/ui/echo` | `show_*` 开关、响应字段矩阵、实时 JSON/text 预览、请求级控制与预设 |
+| IP 定位查询 | `/ui/lookup` | 指定 IP 查询（单条/批量最多 100、`nocache`）、地图预览、连接与隐私标签、该 IP 的查询日志历史 |
 | IP 情报 | `/ui/ip` | 在线查询开关、token、缓存 TTL、Provider 健康表、链路测试、字段/隐私参考 |
 | 数据源 | `/ui/datasets` | 跨数据集统计、按数据集的 Provider（embedded/file/remote/command）、同步、合并顺序、字段参考 |
 | IP 查询链路 | `/ui/chain` | 链路统计与顺序可视化、逐 Provider 统计、逐 IP 测试、归一化字段、配置示例 |
@@ -347,11 +603,12 @@ PBKDF2-SHA256（21 万次迭代）存储。JWT 签名密钥来自 `ECHO_SERVER_J
 ### 安全控制（API Key、IP 规则、维护模式）
 
 安全页新增的配置键：`ip_allowlist` / `ip_denylist`（IP、CIDR，逗号或换行分隔；拒绝优先，空允许列表
-表示全部允许）、`rate_limit_per_min`（按客户端 IP，仅回显流量，`0` 关闭）、`body_limit_kb`（回显请求
-体上限，`0` 关闭）、`cors_origins`、`security_headers`、`maintenance_mode` / `maintenance_message`
-（未认证回显请求返回 `503`，控制台/API 仍可用）、`log_retention_days`（每 6 小时后台清理）以及站点
-键 `site_name` / `site_description` / `timezone` / `locale` / `density`。IP 规则、限流与维护模式只作
-用于回显流量，因此控制台永远不会把运维人员锁在外面。
+表示全部允许）、`rate_limit_per_min`（按客户端 IP 与 TCP 对端双重计费，仅回显流量，`0` 关闭）、
+`body_limit_kb`（回显请求体上限；`0` 时仍保留内置 8MB 硬上限）、`cors_origins`、`security_headers`、
+`maintenance_mode` / `maintenance_message`（未认证回显请求返回 `503`，控制台/API 仍可用）、
+`log_retention_days`（每 6 小时后台清理）以及站点键 `site_name` / `site_description` / `timezone` /
+`locale` / `density`。IP 规则、限流与维护模式只作用于回显流量，因此控制台永远不会把运维人员锁在外面；
+登录/初始化/注册另有独立的按 TCP 对端限流。
 
 命名 API Key（`/api/apikeys`）是共享 token 的替代方案：明文 `esk_…` 密钥**只在创建时返回一次**，
 仅存储其 SHA-256；每个 Key 有 scope（`viewer`/`admin`）和可选过期时间，`last_used` 异步更新。通过
@@ -408,6 +665,9 @@ PBKDF2-SHA256（21 万次迭代）存储。JWT 签名密钥来自 `ECHO_SERVER_J
 | `GET /api/logs?limit=N` | JWT | 最近查询历史（默认 50，最大 500） |
 | `GET/POST/DELETE /api/ipproviders` | JWT / admin 写入 | IP 查询链路（列出、新增/更新、删除） |
 | `POST /api/ipproviders/test` | admin JWT | 通过查询链路查询一个 IP |
+| `GET/POST /api/ip/lookup` | JWT | 查询指定 IP（`?ip=`、`&nocache=1` 或 `{"ips":[…]}`，最多 100 个）；单个地址直接返回 IP 对象 |
+| `POST /api/ip/lookup/bulk` | JWT | 纯文本批量（每行一个或用逗号分隔），响应结构相同 |
+| `GET /api/ip/history?ip=` | JWT | 该 IP 是否/如何调用过 `/echo`，取自查询日志 |
 | `GET /api/logs` | JWT | 筛选历史（`limit/method/country/type/ip/q/days`） |
 | `GET /api/audit`、`/api/audit/export.csv` | JWT | 审计日志（`limit/action/username`，CSV 导出） |
 | `GET/POST/DELETE /api/notifications` | JWT | 列表/未读数、标记单条/全部已读、清理 |
@@ -449,11 +709,69 @@ curl -k -X POST -H "Authorization: Bearer $JWT" -H 'Content-Type: application/js
 
 ## IP 情报
 
-- 默认具备离线能力：约 1 万个内嵌 datacenter 前缀（AWS/GCP/DigitalOcean 官方列表 + 主要托管品牌）
-  以及住宅代理样本集——无需网络。
-- 在线（可选）：`ipwho.is` → `ip-api.com` → `ipinfo.io`，带缓存（`geo_cache_ttl`，默认 24h）。
-- 在管理 UI 设置 **ipinfo token**，可获得街道级坐标和权威的 `proxy/vpn/tor/hosting` 标签。
+IP 定位既可以通过 `/echo`（自动识别调用方自身的来源 IP），也可以通过独立的查询 API 指定任意 IP
+（`/api/ip/lookup`，控制台页面 `/ui/lookup`），适合排查日志里的陌生地址、处理滥用举报或批量补数据。
+
+```bash
+# 查询单个地址（单个结果直接返回 IP 对象）
+curl -k -H "Authorization: Bearer $JWT" 'https://HOST:8443/api/ip/lookup?ip=8.8.8.8'
+
+# 批量（最多 100 个，结果顺序与输入一致）；nocache=1 绕过结果缓存
+curl -k -H "Authorization: Bearer $JWT" -H 'Content-Type: application/json' \
+  -d '{"ips":["8.8.8.8","1.1.1.1","104.131.0.1"],"nocache":false}' https://HOST:8443/api/ip/lookup
+
+# 纯文本批量（每行一个或用逗号分隔）
+printf '8.8.8.8\n1.1.1.1\n' | curl -k -X POST -H "Authorization: Bearer $JWT" \
+  --data-binary @- https://HOST:8443/api/ip/lookup/bulk
+```
+
+- 默认具备离线能力：约 1.48 万个内嵌 datacenter 前缀（AWS/GCP/DigitalOcean/Oracle 官方列表、
+  Akamai 实际宣告前缀 + 主要托管品牌）以及 100 条住宅代理样本——无需网络。
+- 在线（可选）：`ipwho.is` → `ip-api.com` → `ipinfo.io`，带缓存（`geo_cache_ttl`，默认 24h）。失败结果不写缓存，
+  因此一次超时不会让该 IP 的地理信息空白一整天。
+- 在管理 UI 设置 **ipinfo token**，可使用 ipinfo 的 `loc` 坐标和权威的 `proxy/vpn/tor/hosting` 标签；
+  ipinfo 还会返回 `anycast` 标记，为 true 时城市字段没有地理意义。
 - 通过*启用在线 IP 情报*完全关闭在线查询；查询失败时地理位置留空，而不是猜测。
+
+### 准确率与边界
+
+2026-11-18 通过运行中的服务（`/echo?fields=ip`）实测 620 个未缓存 IP：500 个按五大 RIR 分层
+（每区 100 个）+ 120 个中国 IP。独立参照为 DB-IP City Lite（免费月度版），ASN 与国家另用
+Team Cymru 交叉核对；中国样本再对照 zxinc 国内库。
+
+| 字段 | ipwho.is（默认首选），n=620 | ip-api.com，n=150 | ipinfo.io（无 token），n=150 |
+|---|---|---|---|
+| 国家 | 96.6% | 98.6% | 98.7% |
+| 省/州 | 77.5% | 79.7% | 79.1% |
+| 城市名 | 51.6% | 68.1%† | 54.0% |
+| 城市坐标 25km 内 | 76.1%（中位 6km） | 75.4%† | 70.7%（中位 5km） |
+| ASN（有返回时） | 98.6% | 98.2% | 99.1% |
+| 中国省级（79 个） | 66.2% | — | — |
+| 中国城市级（46 个） | 47.8% | 28.3%* | 37.0% |
+| 中国国家级（79 个） | 98.7% | 97.5% | 98.7% |
+
+† ip-api 的城市数据与 DB-IP 同源（本次城市名一致、坐标中位距离为 0km），因此它相对 DB-IP 的
+城市名/坐标一致率是循环印证，不能当作独立准确率。
+
+\* 中国城市级一行是各 Provider 直接与 zxinc 对比；上面的产品级对比走 `auto` 链路，通常最终命中 ipwho.is。
+在 zxinc 给出城市的 46 个 IP 中，ip-api 城市名匹配 28.3%，ipinfo 37.0%，ipwho.is 47.8%。
+
+各家的可用率差别很大：ipwho.is 对 620 个 IP 全部返回，ipinfo 146/150，而 ip-api 免费额度只答了
+66/150，另有 81 个完全无结果（限流会直接丢弃或超时）；还有 3 个由链路降级到 ipwho.is/ipinfo。
+链路把“无结果”当作“换下一个”，因此默认 `auto` 链路仍能拿到数据。
+
+国家级结果足够做统计聚合和粗粒度策略；城市级只能作为线索，不能作为证据。精确地理围栏、风控决策或
+安全相关用途，请配合商业库（MaxMind、IPinfo 付费版、IPIP 等）并保留人工复核。
+
+需要预期的边界：
+
+- **Anycast**（8.8.8.8、1.1.1.1、CDN 边缘）没有唯一城市，各家结果天然不一致；看到 ipinfo 的 `anycast: true` 时应把城市视为未知。
+- **VPN / 代理 / 移动网络**描述的是出口节点或运营商网关，不是真人位置。
+- **中国**城市级精度明显低于北美/欧洲的免费国际 API（实测 47.8% 城市 / 66.2% 省级）；需要中国精度时请用国内库（IPIP、pconline）或 ipinfo token。
+- **`X-Forwarded-For` 按设计被信任**，以适配反向代理；任何客户端都能伪造，所以 `ip` 不是可信身份。需要可信来源时看 TCP 对端 `remote_addr`，或确保前置代理覆盖该头。
+- **离线 `connection_type`** 对 AWS/GCP/DigitalOcean/Cloudflare/Oracle/Akamai 官方前缀覆盖 99–100%，随机公网样本上误判 datacenter 约 0.2%；但对表外的小型托管 ASN 召回很低（约 3%），且内置住宅代理表只有 100 个出口，离线代理识别几乎总是 `unknown`。请用数据源引擎保持表更新，或配置 ipinfo token 获取隐私标签与 `hosting`。
+- **延迟**：在线查询在回显路径上同步执行。缓存未命中时耗时即为 Provider 的响应时间（本次 ipwho.is 中位 365ms、p90 380ms）；ipwho.is 不可用时链路降级到 ip-api（中位约 1.2s、p90 约 4s，即其超时上限）。命中缓存约 5ms。需要严格延迟上限时请缩短链路。
+- **缓存 TTL**（默认 24h）会延迟 IP 重新分配后的变化；`residential_proxy` 也覆盖 ipinfo 报告的 VPN/Tor 出口。
 
 ## 构建与发布
 
@@ -472,11 +790,16 @@ make release-snapshot    # 本地生成 dist/ 压缩包 + 校验和（不发布�
 
 发布流程（完整清单见 [RELEASING.md](RELEASING.md)）：
 
-1. `git tag v1.0.0 && git push origin v1.0.0`
-2. `.github/workflows/release.yml` 运行测试与 GoReleaser；其 `before` 钩子构建 `frontend/dist`。
-3. 产物：linux/darwin/windows × amd64/arm64 的 `echo-server_<version>_<os>_<arch>.tar.gz`（Windows
+1. `git tag v1.0.0 && git push origin v1.0.0` —— 发布**完整产品**。
+2. `git tag lite-v1.0.0 && git push origin lite-v1.0.0` —— 发布**极速版**，作为独立 release 单独
+   打 tag、单独出产物（`echo-server-lite_*`），两者永不混淆。
+3. `.github/workflows/release.yml` 运行测试、对构建出的二进制做实时冒烟测试（`/ip`、`/echo`、控制台
+   页面与 `/api/login`），然后跑 GoReleaser；其 `before` 钩子构建 `frontend/dist`。
+4. `.github/workflows/release-lite.yml` 构建极速二进制，以 `ECHO_SERVER_LITE=1` 启动后断言 `/ip` 可用、
+   `/ui` 与 `/api` 返回 404、且不产生数据库文件，再用 `.goreleaser-lite.yaml` 运行 GoReleaser。
+5. 产物：linux/darwin/windows × amd64/arm64 的 `echo-server_<version>_<os>_<arch>.tar.gz`（Windows
    为 zip）、`checksums.txt`、自动生成的 changelog，以及 GitHub Release。
-4. 版本、提交与构建时间通过 `-X main.serverVersion/buildCommit/buildDate` 注入，展示在 `/ui/system`
+6. 版本、提交与构建时间通过 `-X main.serverVersion/buildCommit/buildDate` 注入，展示在 `/ui/system`
    与 `GET /api/system`。源码构建报告 `version: dev`；发布二进制始终携带 tag。
 
 `.github/workflows/ci.yml` 在每次 push 到 `main`、每个 PR 以及手动触发时运行：构建前端、检查

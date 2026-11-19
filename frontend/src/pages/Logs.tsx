@@ -32,6 +32,7 @@ import {
   SearchOutlined,
   UserOutlined,
 } from '@ant-design/icons';
+import { useNavigate } from 'react-router-dom';
 import { MetricsSummary, QueryLog, SavedView, downloadFile, fmtTime, getJSON, postJSON } from '../api';
 import { useApiError } from '../hooks';
 import { useSession } from '../session';
@@ -61,13 +62,29 @@ interface Filters {
   country: string;
   type: string;
   days: number;
+  // Client-identification filters.
+  family: string;
+  spoofed: string;
 }
 
-const EMPTY: Filters = { q: '', method: '', country: '', type: '', days: 0 };
+const EMPTY: Filters = { q: '', method: '', country: '', type: '', days: 0, family: '', spoofed: '' };
+
+const FAMILY_META: Record<string, { color: string; label: string }> = {
+  browser: { color: 'blue', label: '浏览器' },
+  cli: { color: 'cyan', label: '命令行' },
+  library: { color: 'purple', label: '库' },
+  runtime: { color: 'geekblue', label: '运行时' },
+  tool: { color: 'gold', label: '工具' },
+  bot: { color: 'default', label: '爬虫' },
+  malware: { color: 'red', label: '恶意软件' },
+  tunnel: { color: 'volcano', label: '隧道/VPN' },
+  unknown: { color: 'default', label: '未知' },
+};
 
 const Logs: React.FC = () => {
   const { token, canEdit } = useSession();
   const fail = useApiError();
+  const navigate = useNavigate();
   const [logs, setLogs] = useState<QueryLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [auto, setAuto] = useState(true);
@@ -86,6 +103,8 @@ const Logs: React.FC = () => {
     if (f.country.trim()) p.set('country', f.country.trim());
     if (f.type) p.set('type', f.type);
     if (f.days > 0) p.set('days', String(f.days));
+    if (f.family) p.set('family', f.family);
+    if (f.spoofed) p.set('spoofed', f.spoofed);
     return p.toString();
   };
 
@@ -293,6 +312,23 @@ const Logs: React.FC = () => {
             ]}
           />
           <Select
+            value={filters.family || undefined}
+            onChange={v => setFilters(f => ({ ...f, family: v || '' }))}
+            style={{ width: 140 }}
+            allowClear
+            placeholder="客户端类型"
+            options={Object.entries(FAMILY_META).map(([value, m]) => ({ value, label: m.label }))}
+          />
+          <Segmented
+            value={filters.spoofed || 'any'}
+            onChange={v => setFilters(f => ({ ...f, spoofed: v === 'any' ? '' : String(v) }))}
+            options={[
+              { value: 'any', label: '全部' },
+              { value: '1', label: 'UA 伪造' },
+              { value: '0', label: '未伪造' },
+            ]}
+          />
+          <Select
             value={filters.days}
             onChange={v => setFilters(f => ({ ...f, days: Number(v) }))}
             style={{ width: 130 }}
@@ -349,6 +385,20 @@ const Logs: React.FC = () => {
             { title: '方法', dataIndex: 'method', width: 88, render: (v: string) => <Tag color={METHOD_COLOR[v] || 'default'}>{v || '—'}</Tag> },
             { title: '路径', dataIndex: 'path', ellipsis: true, render: (v: string) => <span className="mono">{v || '—'}</span> },
             { title: '来源 IP', dataIndex: 'ip', width: 150, render: (v: string) => <span className="mono">{v || '—'}</span> },
+            {
+              title: '客户端', width: 150,
+              render: (_: unknown, r) => {
+                if (!r.client_name) return <Text type="secondary">未识别</Text>;
+                const fam = FAMILY_META[r.client_family || 'unknown'] || FAMILY_META.unknown;
+                return (
+                  <Space size={4} wrap>
+                    <span style={{ fontWeight: 600 }}>{r.client_name}</span>
+                    <Tag color={fam.color}>{fam.label}</Tag>
+                    {r.spoofed === 'true' && <Tag color="red">UA 伪造</Tag>}
+                  </Space>
+                );
+              },
+            },
             {
               title: '连接类型', dataIndex: 'connection_type', width: 118,
               render: (v: string) => {
@@ -480,7 +530,34 @@ const Logs: React.FC = () => {
               <Descriptions.Item label="来源 IP"><span className="mono">{selected.ip}</span></Descriptions.Item>
               <Descriptions.Item label="连接类型">{CONN_LABEL[selected.connection_type] || selected.connection_type || '未知'}</Descriptions.Item>
               <Descriptions.Item label="国家">{selected.country || '—'}</Descriptions.Item>
+              <Descriptions.Item label="客户端">
+                {selected.client_name ? (
+                  <Space size={4} wrap>
+                    <Text strong>{selected.client_name}</Text>
+                    <Tag color={(FAMILY_META[selected.client_family || 'unknown'] || FAMILY_META.unknown).color}>
+                      {(FAMILY_META[selected.client_family || 'unknown'] || FAMILY_META.unknown).label}
+                    </Tag>
+                    {selected.spoofed === 'true' && <Tag color="red">UA 伪造</Tag>}
+                  </Space>
+                ) : <Text type="secondary">未识别</Text>}
+              </Descriptions.Item>
+              <Descriptions.Item label="识别来源">{selected.client_source || '—'}</Descriptions.Item>
+              <Descriptions.Item label="JA4"><span className="mono" style={{ fontSize: 11, wordBreak: 'break-all' }}>{selected.ja4 || '—'}</span></Descriptions.Item>
+              <Descriptions.Item label="JA3"><span className="mono" style={{ fontSize: 11, wordBreak: 'break-all' }}>{selected.ja3 || '—'}</span></Descriptions.Item>
+              <Descriptions.Item label="User-Agent"><span style={{ fontSize: 12, wordBreak: 'break-all' }}>{selected.user_agent || '—'}</span></Descriptions.Item>
             </Descriptions>
+            {selected.ip && (
+              <Button
+                icon={<GlobalOutlined />}
+                style={{ marginTop: 16 }}
+                onClick={() => {
+                  setSelected(null);
+                  navigate(`/lookup?ip=${encodeURIComponent(selected.ip)}`);
+                }}
+              >
+                查询这个 IP 的定位信息
+              </Button>
+            )}
             {canEdit && (
               <Button
                 type="primary"

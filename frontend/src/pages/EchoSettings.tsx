@@ -26,6 +26,7 @@ import {
   FileTextOutlined,
   GatewayOutlined,
   ReloadOutlined,
+  SafetyCertificateOutlined,
   SaveOutlined,
   ScanOutlined,
   ThunderboltOutlined,
@@ -85,6 +86,14 @@ const TOGGLES = [
     desc: '返回 HTTP 方法、版本、Cookie 与请求头组合形成的指纹。',
     path: 'ja4h',
     payload: '~54 B',
+  },
+  {
+    key: 'redact_sensitive_headers',
+    icon: <SafetyCertificateOutlined />,
+    title: '凭据头脱敏',
+    desc: '回显时把 Authorization / Cookie / X-API-Key 等换成 "***"；关闭后原样返回，仅用于调试令牌链路。',
+    path: 'headers.authorization → "Bearer ***"',
+    payload: '0 B',
   },
 ];
 

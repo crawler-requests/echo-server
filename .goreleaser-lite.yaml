@@ -1,0 +1,86 @@
+# GoReleaser configuration for the Lite build.
+#
+# The lite binary is the same source tree started with ECHO_SERVER_LITE=1: no
+# SQLite, no users, no datasets, no admin API, no query log. It answers /ip and
+# /echo only, which is what a proxy pool or a high-concurrency egress check
+# needs. It is published as a SEPARATE release (tag `lite-v*`) with its own
+# archives so nobody confuses it with the full product.
+version: 2
+
+project_name: echo-server-lite
+
+before:
+  hooks:
+    # //go:embed frontend/dist must resolve, but the lite build never serves
+    # those files. A placeholder index keeps `go build` happy without pulling
+    # Node into the release pipeline.
+    - mkdir -p frontend/dist
+    - sh -c 'test -f frontend/dist/index.html || echo "<!doctype html><title>lite</title>" > frontend/dist/index.html'
+
+builds:
+  - id: echo-server-lite
+    main: .
+    binary: echo-server-lite
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.serverVersion={{ .Version }}
+      - -X main.buildCommit={{ .FullCommit }}
+      - -X main.buildDate={{ .CommitDate }}
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: lite
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    files:
+      - README.md
+      - README.zh-CN.md
+      - LICENSE
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - "^chore:"
+      - "^style:"
+      - Merge pull request
+      - Merge branch
+
+release:
+  # A separate tag namespace keeps the lite artifacts out of the main release.
+  name_template: "Echo Server Lite {{ .Version }}"
+  draft: false
+  prerelease: auto
+  footer: |
+    **极速版**：只提供 `/ip`（返回出网 IP）与 `/echo`，不含控制台、数据库与账号系统。
+
+    ```bash
+    ECHO_SERVER_LITE=1 ./echo-server-lite
+    curl -k https://HOST:8443/ip          # {"ip":"..."}
+    curl -k http://HOST:8080/ip?format=text
+    ```
+
+    完整产品（含控制台）请下载主 release 的 `echo-server_*` 产物。

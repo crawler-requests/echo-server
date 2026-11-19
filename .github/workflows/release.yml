@@ -46,6 +46,32 @@ jobs:
           go vet ./...
           go test ./... -race -count=1
 
+      # End-to-end smoke test of the artifact's core contract: start the
+      # binary, prove /ip and /echo answer, and prove the console loads.
+      - name: Smoke test (built binary, real HTTP)
+        run: |
+          CGO_ENABLED=0 go build -trimpath -o echo-server-full .
+          ECHO_SERVER_DB=/tmp/smoke.db ECHO_SERVER_ADMIN_USERNAME=smoke \
+            ECHO_SERVER_ADMIN_PASSWORD=smoke-pass-123 \
+            PORT=29443 HTTP_PORT=29080 ./echo-server-full &
+          SERVER_PID=$!
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:29080/health >/dev/null && break
+            sleep 1
+          done
+          echo "--- /ip ---"
+          curl -sf http://127.0.0.1:29080/ip | tee /tmp/ip.json
+          grep -q '"ip"' /tmp/ip.json
+          echo "--- /echo ---"
+          curl -sf 'http://127.0.0.1:29080/echo?fields=ip.ip' | grep -q '"ip"'
+          echo "--- console assets ---"
+          curl -sf http://127.0.0.1:29080/ui/ | grep -q '<div id="root">'
+          echo "--- login works ---"
+          curl -sf -X POST http://127.0.0.1:29080/api/login \
+            -H 'Content-Type: application/json' \
+            -d '{"username":"smoke","password":"smoke-pass-123"}' | grep -q '"token"'
+          kill $SERVER_PID
+
       # GoReleaser's before hooks run `npm ci && npm run build`, producing
       # frontend/dist for //go:embed before compiling the Go binary.
       - name: Run GoReleaser (publish)

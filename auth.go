@@ -215,6 +215,9 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	u, err := AuthenticateUser(req.Username, req.Password)
 	if err != nil {
+		// Only failures burn the tighter credential budget, so a user who logs
+		// in repeatedly is never locked out.
+		authThrottleRecord(tcpPeer(r), true)
 		http.Error(w, "invalid username or password", http.StatusUnauthorized)
 		return
 	}

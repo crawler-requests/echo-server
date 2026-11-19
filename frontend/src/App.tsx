@@ -4,26 +4,31 @@ import zhCN from 'antd/locale/zh_CN';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { SetupStatus, User } from './api';
 import AppLayout from './layout/AppLayout';
-import Dashboard from './pages/Dashboard';
-import EchoSettings from './pages/EchoSettings';
-import IPIntel from './pages/IPIntel';
-import Datasets from './pages/Datasets';
-import IPChain from './pages/IPChain';
-import Users from './pages/Users';
-import Access from './pages/Access';
-import Logs from './pages/Logs';
-import Monitoring from './pages/Monitoring';
-import Audit from './pages/Audit';
-import Notifications from './pages/Notifications';
-import Integrations from './pages/Integrations';
-import Fingerprints from './pages/Fingerprints';
-import Security from './pages/Security';
-import System from './pages/System';
-import Tools from './pages/Tools';
-import ApiDocs from './pages/ApiDocs';
-import Account from './pages/Account';
 import Login from './pages/Login';
 import Setup from './pages/Setup';
+
+// Pages are lazy-loaded so a cold visit downloads only vendor + the landing
+// route; each console page is its own chunk. The build groups the stable
+// stack (react/antd) into one long-lived cache entry.
+const Dashboard = React.lazy(() => import('./pages/Dashboard'));
+const EchoSettings = React.lazy(() => import('./pages/EchoSettings'));
+const IPIntel = React.lazy(() => import('./pages/IPIntel'));
+const IPLookup = React.lazy(() => import('./pages/IPLookup'));
+const Datasets = React.lazy(() => import('./pages/Datasets'));
+const IPChain = React.lazy(() => import('./pages/IPChain'));
+const Users = React.lazy(() => import('./pages/Users'));
+const Access = React.lazy(() => import('./pages/Access'));
+const Logs = React.lazy(() => import('./pages/Logs'));
+const Monitoring = React.lazy(() => import('./pages/Monitoring'));
+const Audit = React.lazy(() => import('./pages/Audit'));
+const Notifications = React.lazy(() => import('./pages/Notifications'));
+const Integrations = React.lazy(() => import('./pages/Integrations'));
+const Fingerprints = React.lazy(() => import('./pages/Fingerprints'));
+const Security = React.lazy(() => import('./pages/Security'));
+const System = React.lazy(() => import('./pages/System'));
+const Tools = React.lazy(() => import('./pages/Tools'));
+const ApiDocs = React.lazy(() => import('./pages/ApiDocs'));
+const Account = React.lazy(() => import('./pages/Account'));
 
 const TOKEN_KEY = 'echo_token';
 
@@ -172,11 +177,19 @@ const App: React.FC = () => {
   } else {
     const isAdmin = me.role === 'admin';
     content = (
+      <React.Suspense
+        fallback={
+          <div style={{ padding: 48, display: 'flex', justifyContent: 'center' }}>
+            <Spin />
+          </div>
+        }
+      >
       <Routes>
         <Route element={<AppLayout token={token} me={me} onLogout={handleLogout} />}>
           <Route index element={<Dashboard />} />
           <Route path="echo" element={<EchoSettings />} />
           <Route path="ip" element={<IPIntel />} />
+          <Route path="lookup" element={<IPLookup />} />
           <Route path="datasets" element={<Datasets />} />
           <Route path="chain" element={<IPChain />} />
           <Route path="users" element={isAdmin ? <Users /> : <Navigate to="/" replace />} />
@@ -195,6 +208,7 @@ const App: React.FC = () => {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>
+      </React.Suspense>
     );
   }
 

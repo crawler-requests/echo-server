@@ -13,7 +13,7 @@ LDFLAGS     := -s -w \
 	-X main.buildCommit=$(COMMIT) \
 	-X main.buildDate=$(BUILD_DATE)
 
-.PHONY: help frontend build build-fast test vet lint snapshot release-snapshot docker clean run
+.PHONY: help frontend build build-fast test vet lint snapshot release-snapshot docker clean run loadtest lite
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -58,3 +58,11 @@ clean: ## Remove build artifacts
 
 run: build ## Build and run the server in the foreground
 	./$(BINARY)
+
+lite: ## Build the lite binary (no database; /ip and /echo only at runtime)
+	go build -trimpath -ldflags "$(LDFLAGS)" -o $(BINARY)-lite .
+	@echo "run it with: ECHO_SERVER_LITE=1 ./$(BINARY)-lite"
+
+loadtest: ## High-concurrency load test against a running lite server (CONNS=100000)
+	go run ./tools/loadtest -mode $(or $(MODE),drive) -c $(or $(CONNS),100000) \
+		-addr $(or $(ADDR),127.0.0.1:8080) -path $(or $(PATH),/ip) -la $(or $(LA),127.0.0.1)

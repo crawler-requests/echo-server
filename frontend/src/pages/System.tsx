@@ -102,6 +102,8 @@ const System: React.FC = () => {
     ['show_ja3', 'TLS JA3', '关闭后省略 JA3 字符串与哈希'],
     ['show_client', '客户端识别', '关闭后省略 client 推断结果'],
     ['show_ja4h', 'HTTP JA4H', '关闭后省略 HTTP 层指纹'],
+    ['enable_http2', 'HTTP/2 与 h2 指纹', '关闭后只协商 HTTP/1.1，不再返回 http2 指纹'],
+    ['redact_sensitive_headers', '凭据头脱敏', '关闭后回显 Authorization / Cookie 原文，仅用于调试'],
     ['show_raw', '原始 ClientHello', '关闭后不返回 base64 / hex 原始数据'],
     ['show_body', '请求体回显', '关闭后响应中的 body 恒为空'],
     ['enable_online_geo', '在线地理查询', '关闭后只使用本地数据与缓存'],
@@ -162,6 +164,17 @@ const System: React.FC = () => {
                     </Form.Item>
                   </Col>
                 </Row>
+                <Form.Item
+                  label="GitHub 仓库"
+                  extra="右上角徽标链接到这里，star 数每 30 分钟最多刷新一次。留空使用内置项目地址。"
+                >
+                  <Input
+                    disabled={!canEdit}
+                    value={cfg.github_repo || ''}
+                    placeholder="crawler-requests/echo-server"
+                    onChange={e => setCfg(p => ({ ...p, github_repo: e.target.value }))}
+                  />
+                </Form.Item>
               </Form>
               <Button
                 type="primary"
@@ -176,6 +189,7 @@ const System: React.FC = () => {
                       timezone: cfg.timezone || 'Asia/Shanghai',
                       locale: cfg.locale || 'zh-CN',
                       density: cfg.density || 'default',
+                      github_repo: (cfg.github_repo || '').trim(),
                     },
                     '站点设置',
                   )

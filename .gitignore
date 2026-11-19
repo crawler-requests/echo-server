@@ -19,3 +19,6 @@ dist/
 # 编辑器/系统文件
 .DS_Store
 *.swp
+
+# ja4dbgen 下载的原始快照（12 MB，按需重新拉取，不入库）
+tools/ja4dbgen/cache/

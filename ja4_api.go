@@ -16,6 +16,11 @@ type ja4Hit struct {
 	Observations uint64            `json:"observations"`
 	Verified     bool              `json:"verified"`
 	Clients      []ClientCandidate `json:"clients"`
+	// Context the fingerprint's submissions carried, and whether the evidence
+	// was fused from more than one source (crowd + curated malware mapping).
+	OS    []string `json:"os,omitempty"`
+	Libs  []string `json:"libs,omitempty"`
+	Fused bool     `json:"fused,omitempty"`
 }
 
 // ja4SearchHandler searches every configured JA4 library by fingerprint
@@ -69,6 +74,7 @@ func ja4SearchHandler(w http.ResponseWriter, r *http.Request) {
 				JA4: fp, Provider: libName, Name: m.Name, Family: m.Family,
 				Version: m.Version, Confidence: m.Confidence, Observations: m.Observations,
 				Verified: m.Verified, Clients: m.Candidates,
+				OS: m.OS, Libs: m.Libs, Fused: m.Fused,
 			}})
 		}
 	}

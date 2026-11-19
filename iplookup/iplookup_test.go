@@ -322,6 +322,38 @@ func TestMaskInherit(t *testing.T) {
 	}
 }
 
+func TestDecodeAnycastField(t *testing.T) {
+	// Normalized contract: the field round-trips, including false vs absent.
+	info, err := decodeInfo([]byte(`{"country":"US","anycast":true}`), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Anycast == nil || !*info.Anycast {
+		t.Fatalf("anycast = %v, want true", info.Anycast)
+	}
+	info, err = decodeInfo([]byte(`{"country":"US"}`), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Anycast != nil {
+		t.Fatalf("absent anycast must stay nil, got %v", *info.Anycast)
+	}
+	// A custom provider can map it like any other field.
+	info, err = decodeInfo([]byte(`{"geo":{"anycast":true},"country":"US"}`),
+		map[string]string{"country": "country", "anycast": "geo.anycast"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Anycast == nil || !*info.Anycast {
+		t.Fatalf("mapped anycast = %v, want true", info.Anycast)
+	}
+	// An anycast flag alone must not stop the chain with an otherwise empty
+	// answer; it is only meaningful alongside real location/ASN fields.
+	if _, err := decodeInfo([]byte(`{"anycast":false}`), nil); err == nil {
+		t.Fatal("anycast-only response should not be usable")
+	}
+}
+
 // atomicValue is a tiny race-free string holder for test handlers.
 type atomicValue struct {
 	mu sync.Mutex

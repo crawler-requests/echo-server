@@ -155,6 +155,7 @@ func geoToLookupInfo(g *geoData) *iplookup.Info {
 		IsVPN:       g.IsVPN,
 		IsTor:       g.IsTor,
 		IsHosting:   g.IsHosting,
+		Anycast:     g.Anycast,
 		Source:      g.Source,
 	}
 }
@@ -183,6 +184,7 @@ func lookupInfoToGeo(i *iplookup.Info) *geoData {
 		IsVPN:       i.IsVPN,
 		IsTor:       i.IsTor,
 		IsHosting:   i.IsHosting,
+		Anycast:     i.Anycast,
 		Source:      i.Source,
 	}
 }

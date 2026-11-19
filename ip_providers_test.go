@@ -247,6 +247,42 @@ func TestIPProvidersAPI_ListUpsertDeleteTest(t *testing.T) {
 	}
 }
 
+// A total provider failure must not be cached for geo_cache_ttl: otherwise a
+// single timeout or rate-limit would blank that IP's geolocation for a day.
+func TestIPProviderFailureIsNotCached(t *testing.T) {
+	withIPChain(t)
+	m := ipLookupManager()
+	for _, name := range []string{"ipwhois", "ipapi", "ipinfo"} {
+		if _, err := m.Upsert(iplookup.Config{Name: name, Enabled: false}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var calls atomic.Int32
+	down := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		http.Error(w, "upstream down", http.StatusBadGateway)
+	}))
+	defer down.Close()
+	if _, err := m.Upsert(iplookup.Config{
+		Name: "down", Kind: iplookup.KindHTTP, Enabled: true, Priority: 100,
+		URL: down.URL + "/?ip={ip}",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	resetGeoCache()
+
+	first := fetchIPInfo("198.51.100.77")
+	second := fetchIPInfo("198.51.100.77")
+	if calls.Load() != 2 {
+		t.Fatalf("failed lookup was cached: provider calls = %d, want 2", calls.Load())
+	}
+	for _, info := range []*IPInfo{first, second} {
+		if info == nil || info.Country != "" || info.GeoSource != "local" {
+			t.Fatalf("failed lookup must return the local baseline, got %+v", info)
+		}
+	}
+}
+
 func TestIPProviderTestEndpoint_NoAnswer(t *testing.T) {
 	withIPChain(t)
 	_ = SetConfig("enable_online_geo", "false")

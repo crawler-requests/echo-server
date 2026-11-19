@@ -23,6 +23,14 @@ export interface QueryLog {
   ip: string;
   connection_type: string;
   country: string;
+  // Client identification persisted with each request.
+  client_name?: string;
+  client_family?: string;
+  client_source?: string;
+  ja4?: string;
+  ja3?: string;
+  user_agent?: string;
+  spoofed?: string;
 }
 
 export interface Stats {

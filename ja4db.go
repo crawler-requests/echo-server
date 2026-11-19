@@ -54,7 +54,10 @@ type dbEntry struct {
 	Apps []dbPair `json:"apps,omitempty"`
 	Libs []dbPair `json:"libs,omitempty"`
 	OSes []dbPair `json:"os,omitempty"`
-	UAs  []dbPair `json:"uas"`
+	UAs  []dbPair `json:"uas,omitempty"`
+	// Src lists the contributing sources ("ja4db", "foxio", or both) so the
+	// console can say whether a match is crowd-sourced, hand-curated, or both.
+	Src string `json:"src,omitempty"`
 }
 
 type dbFile struct {
@@ -87,6 +90,14 @@ type dbAgg struct {
 	votes    []dbVote // sorted by count desc
 	named    uint64   // total weight that mapped to a known client name
 	unparsed uint64   // weight of UA strings we cannot name (bots, junk)
+	// osHints and libHints are the top OS/library labels the submissions
+	// carried. They are context, not identity: "Chrome on Windows 10" says
+	// more than "Chrome", and a malware fingerprint's library ("GoLang",
+	// "WinINET") is often the only structural clue.
+	osHints  []string
+	libHints []string
+	// fused marks evidence from more than one source.
+	fused bool
 }
 
 type dbMeta struct {
@@ -181,6 +192,7 @@ func loadJA4DB() {
 // sorted by weight and then by name.
 func aggregate(f *dbEntry, exact bool) *dbAgg {
 	a := &dbAgg{obs: f.N, verified: f.V, exact: exact}
+	a.fused = strings.Contains(f.Src, "+")
 	byName := map[string]*dbVote{}
 
 	for _, p := range f.UAs {
@@ -242,8 +254,29 @@ func aggregate(f *dbEntry, exact bool) *dbAgg {
 	for _, v := range byName {
 		a.votes = append(a.votes, *v)
 	}
+	// Keep the most common OS and library labels as context. "#"-prefixed
+	// labels are provenance notes from the fused generator, not place names;
+	// they are dropped here (the match note carries the useful ones).
+	a.osHints = topLabels(f.OSes, 3)
+	a.libHints = topLabels(f.Libs, 3)
 	finalizeAgg(a)
 	return a
+}
+
+// topLabels returns up to n non-note labels from a vote list, most common first.
+func topLabels(pairs []dbPair, n int) []string {
+	out := make([]string, 0, n)
+	for _, p := range pairs {
+		if len(out) >= n {
+			break
+		}
+		l := strings.TrimSpace(p.Label)
+		if l == "" || strings.HasPrefix(l, "#") {
+			continue
+		}
+		out = append(out, l)
+	}
+	return out
 }
 
 func finalizeAgg(a *dbAgg) {
@@ -291,6 +324,13 @@ func mergeAgg(dst, src *dbAgg) {
 	for _, v := range byName {
 		dst.votes = append(dst.votes, *v)
 	}
+	// Prefix buckets merge many builds; keep the first (most common) hints.
+	if len(dst.osHints) == 0 {
+		dst.osHints = src.osHints
+	}
+	if len(dst.libHints) == 0 {
+		dst.libHints = src.libHints
+	}
 }
 
 // ja4Prefix returns the version-independent part of a JA4: head + cipher hash.
@@ -314,6 +354,13 @@ type dbMatch struct {
 	Verified     bool
 	Provider     string // provider name that supplied the match ("builtin", or a custom name)
 	Note         string // e.g. "matched on the JA4 prefix (newer client build)"
+	// OS/library context observed alongside this fingerprint (from the
+	// submission rows and the curated mapping). Empty when the source has none.
+	OS   []string
+	Libs []string
+	// Fused marks a fingerprint whose evidence came from more than one source
+	// (e.g. the curated malware mapping plus crowd submissions).
+	Fused bool
 }
 
 // ClientCandidate is one plausible client for a fingerprint, with its share of
@@ -383,6 +430,9 @@ func aggToMatch(a *dbAgg, exact bool) *dbMatch {
 		Observations: a.obs,
 		Exact:        exact,
 		Verified:     a.verified > 0,
+		OS:           a.osHints,
+		Libs:         a.libHints,
+		Fused:        a.fused,
 	}
 	if m.Family == "" {
 		m.Family = "unknown"
@@ -476,11 +526,29 @@ func isPlainVersion(s string) bool {
 }
 
 // familyForName maps an application label from the database to our families.
+// malwareNames are client names that denote offensive-security tooling,
+// C2 frameworks or malware loaders rather than a legitimate HTTP client.
+// Fingerprints for these come from the curated FoxIO mapping and are the
+// highest-value signal this service can give an operator.
+var malwareNames = []string{
+	"cobalt strike", "sliver", "qakbot", "icedid", "lumma", "pikabot",
+	"darkgate", "havoc", "metasploit", "meterpreter", "brute ratel",
+	"emotet", "trickbot", "asyncrat", "njrat", "remcos", "quasar",
+}
+
+// tunnelNames are legitimate tools that are nevertheless used to reach a
+// network from the outside (or to hide the real egress).
+var tunnelNames = []string{"softether", "ngrok", "openvpn", "wireguard", "frp", "chisel"}
+
 func familyForName(name string) string {
 	n := strings.ToLower(strings.TrimSpace(name))
 	switch {
 	case n == "":
 		return ""
+	case containsAny(n, malwareNames...):
+		return "malware"
+	case containsAny(n, tunnelNames...):
+		return "tunnel"
 	case strings.Contains(n, "bot"), strings.Contains(n, "crawler"), strings.Contains(n, "spider"):
 		return "bot"
 	case strings.Contains(n, "chrome"), strings.Contains(n, "chromium"),
@@ -501,6 +569,16 @@ func familyForName(name string) string {
 		return "runtime"
 	}
 	return ""
+}
+
+// containsAny reports whether s contains any of the given lowercase tokens.
+func containsAny(s string, tokens ...string) bool {
+	for _, t := range tokens {
+		if strings.Contains(s, t) {
+			return true
+		}
+	}
+	return false
 }
 
 // majorVersion returns the leading numeric component of a version string.

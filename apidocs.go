@@ -14,6 +14,7 @@ type endpointDoc struct {
 
 var endpointDocs = []endpointDoc{
 	{"GET", "/health", "健康检查", "运维", "public"},
+	{"GET", "/ip", "极速版：只返回调用方出网 IP", "回显", "optional"},
 	{"GET", "/metrics", "Prometheus 指标", "运维", "public"},
 	{"GET", "/api/openapi.json", "OpenAPI 文档", "运维", "public"},
 	{"GET", "/api/setup/status", "初始化与注册状态", "账户", "public"},
@@ -42,6 +43,10 @@ var endpointDocs = []endpointDoc{
 	{"GET", "/api/ipproviders", "IP 查询链", "数据", "user"},
 	{"POST", "/api/ipproviders", "新增 IP Provider", "数据", "admin"},
 	{"POST", "/api/ipproviders/test", "测试 IP Provider", "数据", "admin"},
+	{"GET", "/api/ip/lookup", "查询指定 IP 的地理与 ASN", "数据", "user"},
+	{"POST", "/api/ip/lookup", "批量查询指定 IP（最多 100 个）", "数据", "user"},
+	{"POST", "/api/ip/lookup/bulk", "纯文本批量查询（每行一个 IP）", "数据", "user"},
+	{"GET", "/api/ip/history", "某 IP 的回显请求历史", "数据", "user"},
 	{"GET", "/api/ja4/search", "JA4 指纹搜索", "指纹", "user"},
 	{"GET", "/api/ja4/stats", "JA4 库统计", "指纹", "user"},
 	{"GET", "/api/apikeys", "API Key 列表", "安全", "admin"},

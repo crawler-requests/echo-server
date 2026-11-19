@@ -29,6 +29,11 @@ func initExtraDB() {
 				ip TEXT NOT NULL DEFAULT ''
 			)`,
 			`CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_log(ts)`,
+			// The console filters the audit trail by actor and by action
+			// prefix; the query log's hottest lookups are by IP and by
+			// connection type/country.
+			`CREATE INDEX IF NOT EXISTS idx_audit_username ON audit_log(username)`,
+			`CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action)`,
 			`CREATE TABLE IF NOT EXISTS api_keys (
 				id INTEGER PRIMARY KEY AUTOINCREMENT,
 				name TEXT NOT NULL UNIQUE,
@@ -69,6 +74,13 @@ func initExtraDB() {
 				created_at TEXT NOT NULL,
 				UNIQUE(page, name)
 			)`,
+			// The console lists notifications by read state and time, saved
+			// views by page, and API keys by hash on every key-authenticated
+			// request.
+			`CREATE INDEX IF NOT EXISTS idx_notifications_read_ts ON notifications(read, ts)`,
+			`CREATE INDEX IF NOT EXISTS idx_saved_views_page ON saved_views(page)`,
+			`CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash)`,
+			`CREATE INDEX IF NOT EXISTS idx_webhooks_enabled ON webhooks(enabled)`,
 		}
 		for _, s := range stmts {
 			_, _ = db.Exec(s)

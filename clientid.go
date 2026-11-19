@@ -31,6 +31,9 @@ type clientID struct {
 	dbObs      uint64
 	dbPrefix   bool
 	source     string // ja4db | ja4db_prefix | ja4db:<provider> | ja4_measured | ja3_measured | ja4_heuristic
+	osHints    []string
+	libHints   []string
+	fused      bool
 }
 
 func (c clientID) id() ClientInfo {
@@ -53,13 +56,16 @@ func (c clientID) id() ClientInfo {
 		Notes:          c.notes,
 		Candidates:     c.candidates,
 		DBObservations: c.dbObs,
+		OS:             c.osHints,
+		Library:        c.libHints,
+		Fused:          c.fused,
 	}
 }
 
 // ClientInfo is the public per-request client identification.
 type ClientInfo struct {
 	Name           string            `json:"name,omitempty"`            // best-guess client, e.g. "curl" or "Chrome"
-	Family         string            `json:"family,omitempty"`          // browser | cli | library | runtime | tool | bot | unknown
+	Family         string            `json:"family,omitempty"`          // browser | cli | library | runtime | tool | bot | malware | tunnel | unknown
 	Version        string            `json:"version,omitempty"`         // e.g. "8.5.0", "21.x", "120+"
 	Confidence     float64           `json:"confidence"`                // 0..1
 	Signal         string            `json:"signal,omitempty"`          // which signals contributed
@@ -70,6 +76,14 @@ type ClientInfo struct {
 	Spoofed        bool              `json:"spoofed,omitempty"`         // UA and TLS disagree
 	Notes          []string          `json:"notes,omitempty"`           // caveats (version drift, etc.)
 	HeaderSet      string            `json:"header_set_hash,omitempty"` // hash of which headers were present
+	// OS and Library are context observed alongside the fingerprint: "Chrome on
+	// Windows 10" is more actionable than "Chrome", and a malware fingerprint's
+	// backing library (GoLang, WinINET) is often its only structural clue.
+	OS      []string `json:"os,omitempty"`
+	Library []string `json:"library,omitempty"`
+	// Fused marks evidence merged from more than one fingerprint source
+	// (crowd submissions + the curated malware mapping).
+	Fused bool `json:"fused,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
@@ -241,6 +255,9 @@ func clientIDFromDB(m *dbMatch) clientID {
 		dbObs:      m.Observations,
 		dbPrefix:   !m.Exact,
 		source:     src,
+		osHints:    m.OS,
+		libHints:   m.Libs,
+		fused:      m.Fused,
 	}
 }
 
@@ -276,6 +293,10 @@ func mergeMeasured(measured clientID, m *dbMatch) clientID {
 	out.source = "ja4_measured"
 	out.candidates = m.Candidates
 	out.dbObs = m.Observations
+	// The library is authoritative for the fingerprint's observed environment;
+	// our single measurement has no OS context to offer.
+	out.osHints, out.libHints = m.OS, m.Libs
+	out.fused = m.Fused
 	out.evidence = append(out.evidence, ja4dbEvidence(m))
 	if m.Note != "" {
 		out.evidence = append(out.evidence, m.Note)

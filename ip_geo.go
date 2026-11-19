@@ -55,6 +55,7 @@ type geoData struct {
 	IsVPN     *bool
 	IsTor     *bool
 	IsHosting *bool
+	Anycast   *bool
 	Source    string // ipwhois | ipapi | ipinfo | local
 }
 
@@ -127,6 +128,23 @@ func geoCachePut(ip string, info *IPInfo) {
 		old := geoCache.order[0]
 		geoCache.order = geoCache.order[1:]
 		delete(geoCache.m, old)
+	}
+}
+
+// geoCacheDelete drops one entry so the next fetchIPInfo re-queries the
+// provider chain. Used by the explicit "nocache" lookup mode.
+func geoCacheDelete(ip string) {
+	geoCache.Lock()
+	defer geoCache.Unlock()
+	if _, ok := geoCache.m[ip]; !ok {
+		return
+	}
+	delete(geoCache.m, ip)
+	for i, k := range geoCache.order {
+		if k == ip {
+			geoCache.order = append(geoCache.order[:i], geoCache.order[i+1:]...)
+			break
+		}
 	}
 }
 
@@ -274,6 +292,7 @@ func lookupIPInfo(ip string) (*geoData, error) {
 		Postal   string `json:"postal"`
 		Timezone string `json:"timezone"`
 		Loc      string `json:"loc"`
+		Anycast  *bool  `json:"anycast"`
 	}
 	if err := json.Unmarshal(body, &d); err != nil {
 		return nil, err
@@ -281,15 +300,21 @@ func lookupIPInfo(ip string) (*geoData, error) {
 	if d.IP == "" && d.Country == "" {
 		return nil, fmt.Errorf("ipinfo lookup returned no data")
 	}
+	cc := normalizeCountryCode(d.Country)
+	country := countryName(cc)
+	if country == "" {
+		country = d.Country
+	}
 	g := &geoData{
 		IP:          firstNonEmpty(d.IP, ip),
 		City:        d.City,
 		Region:      d.Region,
-		Country:     d.Country,
+		Country:     country,
 		Postal:      d.Postal,
 		Timezone:    d.Timezone,
 		Source:      "ipinfo",
-		CountryCode: normalizeCountryCode(d.Country),
+		CountryCode: cc,
+		Anycast:     d.Anycast,
 	}
 	if d.Loc != "" {
 		if parts := strings.Split(d.Loc, ","); len(parts) == 2 {
@@ -381,8 +406,27 @@ func fetchIPInfo(ip string) *IPInfo {
 	g := lookupGeo(ip)
 	info := geoDataToIPInfo(ip, g, ct)
 	finalizeClassification(info, g)
-	geoCachePut(ip, info)
+	// Only cache answers that actually carry provider data. Caching a total
+	// failure for geo_cache_ttl (24h by default) would turn a transient
+	// timeout or rate-limit into a day of empty geolocation for that IP.
+	if infoHasLookupData(info) {
+		geoCachePut(ip, info)
+	}
 	return info
+}
+
+// infoHasLookupData reports whether a result contains anything beyond the
+// local connection-type baseline, i.e. whether a provider actually answered.
+func infoHasLookupData(info *IPInfo) bool {
+	if info == nil {
+		return false
+	}
+	return info.Country != "" || info.CountryCode != "" || info.Region != "" ||
+		info.City != "" || info.Postal != "" || info.Timezone != "" ||
+		info.Continent != "" || info.Latitude != 0 || info.Longitude != 0 ||
+		info.ASN != "" || info.ASNName != "" || info.Org != "" || info.ISP != "" ||
+		info.IsProxy != nil || info.IsVPN != nil || info.IsTor != nil ||
+		info.IsHosting != nil || info.Anycast != nil
 }
 
 func geoDataToIPInfo(ip string, g *geoData, ct string) *IPInfo {
@@ -415,6 +459,7 @@ func geoDataToIPInfo(ip string, g *geoData, ct string) *IPInfo {
 	info.IsVPN = g.IsVPN
 	info.IsTor = g.IsTor
 	info.IsHosting = g.IsHosting
+	info.Anycast = g.Anycast
 	info.GeoSource = g.Source
 	return info
 }

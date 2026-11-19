@@ -1,14 +1,14 @@
 # Echo Server Product Design
 
 ## Overview
-Echo Server is a self-contained HTTPS service that echoes full request metadata (headers, body, complete TLS ClientHello with raw bytes, JA3), the client's public IP with ASN/organization, high-precision geolocation (country / region / city / postal / latitude / longitude / timezone) and a connection classification (`datacenter` / `residential_proxy` / `unknown`).
+Echo Server is a self-contained HTTPS service that echoes full request metadata (headers, body, complete TLS ClientHello with raw bytes, JA3), the client's public IP with ASN/organization, city-level geolocation (country / region / city / postal / latitude / longitude / timezone) and a connection classification (`datacenter` / `residential_proxy` / `unknown`).
 
 The single Go binary embeds a React + Ant Design admin frontend, uses SQLite for persistent configuration, query history and user accounts, supports JWT login (SQLite-backed users with `admin`/`viewer` roles) and optional API token authentication, and lets callers pick the response format (JSON or plain text) and a subset of fields per request.
 
 ## Goals
 - Single distributable binary (no external dependencies at runtime)
 - Complete request/TLS/IP fingerprinting for crawler-requests organization
-- High-precision IP geolocation with residential-proxy vs datacenter distinction
+- City-level IP geolocation (country-level accuracy ~97%, city-level best-effort) with residential-proxy vs datacenter distinction
 - Per-request control of response format and returned fields (bandwidth/perf savings)
 - Admin UI for configuration and history inspection without restarting the service
 - Self-hosted user accounts with no cleartext passwords and immediate revocation
@@ -16,8 +16,8 @@ The single Go binary embeds a React + Ant Design admin frontend, uses SQLite for
 
 ## Non-Goals
 - Fine-grained per-resource permissions (only `admin`/`viewer` today)
-- HTTP/2 or QUIC fingerprinting beyond current JA3 support
-- Docker / systemd packaging
+- QUIC / HTTP/3 fingerprinting (HTTP/2 fingerprinting ships; QUIC needs a separate UDP stack)
+- Docker / systemd packaging (a Dockerfile exists, but no compose file or service unit ships)
 
 ## Architecture
 
@@ -34,7 +34,7 @@ The single Go binary embeds a React + Ant Design admin frontend, uses SQLite for
 - `ip_classify.go`: `classifyIP` delegates to `ipclass.Classify`
 - `ipclass/classify.go`: embedded positive CIDR tables (`data/datacenter_ranges.csv`, `data/residential_proxy_ranges.csv`) + `OrgLooksDatacenter` ASN/org heuristic; runtime range/keyword overrides so datasets drive classification without touching the package
 - `ip_geo.go`: multi-provider IP intel (ipwho.is → ip-api.com → ipinfo.io), TTL memory cache, provider normalization, classification finalization
-- `storage.go`: SQLite abstraction (`~/.echo-server/echo.db`, overridable via `ECHO_SERVER_DB`) with `config`, `query_log` and `users` tables
+- `storage.go`: SQLite abstraction (`~/.echo-server/echo.db`, overridable via `ECHO_SERVER_DB`) with `config`, `query_log` and `users` tables. `query_log` also persists the client-identification verdict (`client_name`/`client_family`/`client_source`/`ja4`/`ja3`/`user_agent`/`spoofed`), so history answers "which clients hit us" and "how many UA spoofs" rather than only the live response. Existing databases get the columns via idempotent `ALTER TABLE ADD COLUMN`.
 - `users.go`: user accounts — PBKDF2-SHA256 (210k iterations, random salt) password hashes, `admin`/`viewer` roles, enable/disable, last-login tracking, first-run setup (`CreateFirstAdmin`, only while the table is empty, always admin; no default password; headless bootstrap via `ECHO_SERVER_ADMIN_USERNAME`/`ECHO_SERVER_ADMIN_PASSWORD`), optional self-registration (viewer-only), last-enabled-admin protection
 - `users_api.go`: account API (`/api/setup`, `/api/setup/status`, `/api/register`, `/api/users`, `/api/me`, `/api/me/password`)
 - `auth.go`: JWT (HS256, 12h) for SQLite accounts + API token; the signing key comes from `ECHO_SERVER_JWT_SECRET` or is generated once and persisted (`jwt_secret`), with `rotateJWTSecret()` behind a mutex; every authenticated request re-reads the account so disabled/deleted users and role changes take effect immediately; a missing/invalid Bearer token falls back to `X-API-Key`; `adminMiddleware` gates account management
@@ -81,9 +81,15 @@ Answers "which client is this?" by combining signals, weighted by how hard each 
    providers, the embedded JA4DB snapshot always last. Exact-JA4 first, then a JA4 prefix (head + cipher hash)
    for builds newer than a library, walking providers from highest priority to lowest; the first provider that
    knows the fingerprint wins.
-   - `builtin` (embedded, always last) — the frozen JA4DB public-API snapshot (ja4db.com; now closed, mirrored
-     at github.com/Niicolaa/ja4db-export): 1,572 fingerprints / ~74k observations, compacted by
-     `tools/ja4dbgen` into `data/ja4db.json` (~600 KB, embedded).
+   - `builtin` (embedded, always last) — a **fusion** built by `tools/ja4dbgen` into `data/ja4db.json`
+     (~620 KB, embedded): the frozen JA4DB public-API snapshot (ja4db.com; now closed, mirrored at
+     github.com/Niicolaa/ja4db-export, pinned to the last full commit) supplies ~1.6k fingerprints /
+     ~320k submissions with their real User-Agent and OS/library rows; FoxIO's `ja4plus-mapping.csv`
+     adds curated application names no submission database carries (Cobalt Strike, Sliver, Qakbot,
+     IcedID, Lumma, Pikabot, Darkgate, SoftEther, ngrok). Curated names are weighted against each
+     fingerprint's submission volume so a hand-verified malware match stays visible, and curated-only
+     fingerprints get a synthetic observation so nothing reports `n=0`. Malware/tunnel names map to
+     `family: "malware"` / `"tunnel"` instead of `unknown`.
    - `file` (local) — operator-supplied JSON (the same contract) or community CSV (`ja4_fingerprint.csv`,
      imported with the generator's aggregation rules); a **directory** provider merges every decodable file.
    - `remote` (cloud) — the same JSON contract fetched over HTTPS (or any `RegisterScheme` scheme), cached on
@@ -165,7 +171,7 @@ as the top-level `ja4h` field, controlled by `show_ja4h` (default on).
 
 ### IP classification and geolocation
 Connection type resolution order:
-1. **Local CIDR table** (offline, deterministic): datacenter table (~10k prefixes, AWS/GCP/DigitalOcean official ranges + Cloudflare/Hetzner/OVH/Fastly/Akamai/Oracle/etc.) → `datacenter`; residential-proxy sample set → `residential_proxy`; datacenter wins on overlap.
+1. **Local CIDR table** (offline, deterministic): datacenter table (~14.8k prefixes, AWS/GCP/DigitalOcean/Oracle official ranges + Akamai's announced prefixes + Cloudflare/Hetzner/OVH/Fastly/etc.) → `datacenter`; residential-proxy sample set → `residential_proxy`; datacenter wins on overlap. Official "all IPs are ours" lists are filtered where the routed addresses actually belong to someone else: AWS Wavelength blocks (Verizon/BT/... carrier subscriber space) and AWS China blocks (China Mobile/Unicom/Telecom) are excluded. A single 23.0.0.0/8 entry was removed because it labelled every AT&T/Comcast/Charter address as a datacenter.
 2. **Authoritative privacy labels** (only when an ipinfo token is configured): `proxy`/`vpn`/`tor` → `residential_proxy`, `hosting` → `datacenter`.
 3. **ASN/org heuristic**: if still `unknown` and the org name matches a hosting/cloud brand (Amazon, Microsoft, Google, DigitalOcean, Hetzner, …) → `datacenter`.
 
@@ -200,6 +206,52 @@ Results are cached in memory with a configurable TTL (`geo_cache_ttl`, default 2
 entries). Private/loopback addresses never trigger lookups. When no provider answers, geolocation fields are
 **left empty** and `geo_source="local"` — the server does not fabricate coordinates.
 
+The lookup runs **synchronously** on the echo path. A cache miss can therefore wait for the whole provider
+chain (built-in HTTP providers use a 4s timeout each), so worst-case added latency grows with the number of
+enabled providers that time out. Caching keeps steady-state requests fast; deployments that need a hard
+latency bound should keep the chain short or disable online lookup.
+
+### Explicit IP lookup (`/api/ip/lookup`)
+The echo path infers the address from `X-Forwarded-For`/`TCP peer`, i.e. it answers "who is calling me".
+A separate API answers "tell me about *this* address": `GET /api/ip/lookup?ip=…` (or `&ips=a,b`,
+`&nocache=1`), `POST /api/ip/lookup` with `{"ip"|"ips", "nocache"}`, and `POST /api/ip/lookup/bulk`
+taking plain text (one address per line or comma separated). Rules:
+
+- Only bare IPv4/IPv6 literals are accepted — a trailing `:port` or bracketed `[v6]` is normalized,
+  while hostnames, schemes and junk are rejected with 400 rather than silently resolved.
+- At most 100 addresses per request (`maxLookupIPs`); duplicates are dropped and the output keeps
+  input order. Batch results run on a small worker pool, so a 100-address cache miss is a handful of
+  upstream round trips in parallel, not 100 serial ones.
+- One address answers with the bare IP object (simple `curl | jq` pipelines); several answer with
+  `{count, answered, results}`. Each result carries `input`, `valid`, `cached` and an `error` that
+  distinguishes "invalid input", "private address", "online lookup disabled" and "no provider answered".
+- `nocache` clears that address's cache entry first, so an operator can re-check a stale answer.
+- `GET /api/ip/history?ip=` joins back to the query log to show whether that address ever called `/echo`.
+
+The console page `/ui/lookup` wraps the same endpoints: single/batch input, an OpenStreetMap preview
+(suppressed for anycast, where coordinates are meaningless), connection/privacy tags and per-IP history.
+
+### Throughput design
+
+Three things dominated the request path at load, in this order:
+
+1. **Config lookups hit SQLite.** `GetConfig` was a `SELECT` per call, and the echo handler reads ~15
+   keys — ~200 µs of database time per request, serialised. The whole `config` table is now cached in
+   memory (`storage.go`); `SetConfig` is the only writer and refreshes the cache, so the console sees
+   changes immediately. This alone moved `/echo` from 1.3k to 6.8k rps.
+2. **Per-request access logging.** `log.Printf` locks `os.Stderr`; a 6-second test wrote a 34 MB log.
+   The access line is now behind `access_log=true`; the query log carries the same fields.
+3. **Synchronous log inserts.** Every `/echo` committed a row to SQLite on the request path, tying
+   latency to a disk commit. Records are now queued and written in 256-row transactions by a single
+   writer goroutine (`flushQueryLog`); the request path is a non-blocking channel send, and a full
+   queue drops the row (counted) rather than adding latency. `FlushQueryLog` drains it on shutdown.
+
+Also tuned: HTTP server `ReadHeaderTimeout`/`IdleTimeout`/`MaxHeaderBytes` (dead clients cannot pin
+goroutines), and SQLite `journal_mode=WAL` + `busy_timeout` + a bounded 8-connection pool.
+
+The `/ip` fast path (`ip_only.go`) skips TLS parsing, fingerprinting, geolocation and the query log
+entirely — it writes one pre-built byte string. It is the endpoint to point a proxy pool at.
+
 ### Per-request response control
 Two independent knobs, resolved as **query parameter > request header > admin default**:
 
@@ -222,13 +274,17 @@ Two independent knobs, resolved as **query parameter > request header > admin de
 | `show_body` | true | include the request body |
 | `show_client` | true | include the `client` identification block |
 | `show_ja4h` | true | include the `ja4h` HTTP-layer fingerprint |
+| `redact_sensitive_headers` | true | mask `Authorization`/`Cookie`/`X-Api-Key`/… values in the echoed headers (`Bearer ***` keeps the scheme); only disable while debugging tokens |
+| `enable_http2` | true | advertise h2 in ALPN and capture the HTTP/2 fingerprint; `false` pins HTTP/1.1-only |
+| `github_repo` | `crawler-requests/echo-server` | repo the console header badge links to; star count cached 30 min |
+| `access_log` | false | per-request `log.Printf` access line (stdout). Off by default: it serialises on stderr and dominates the profile above ~10k rps; the query log already records the same fields |
 | `require_token` | false | echo endpoint requires JWT or API token |
 | `allow_registration` | false | expose public self-registration; new accounts are always viewers |
 | `api_token` | (empty) | shared token accepted via `X-API-Token` or `?token=` |
 | `enable_online_geo` | true | allow outbound IP-intel lookups |
 | `geo_provider` | auto | `auto` / `ipwhois` / `ipapi` / `ipinfo` / `offline` |
 | `geo_cache_ttl` | 24 | cache TTL in hours |
-| `ipinfo_token` | (empty) | enables street-level geolocation + privacy labels; also boosts the `ipinfo` chain link |
+| `ipinfo_token` | (empty) | enables ipinfo's `loc` (coordinates, city-level) + privacy labels; also boosts the `ipinfo` chain link |
 | `ip_lookup_providers` | built-ins | JSON array of the IP lookup chain (built-in/HTTP/command providers, order and stats; managed by the admin UI/API or `IP_LOOKUP_PROVIDERS`) |
 | `default_format` | json | fallback format when the request specifies none |
 | `dataset_providers:<name>` | (empty) | JSON array of custom providers per dataset (managed by the admin UI/API; `ja4`, `datacenter_cidr`, `residential_proxy_cidr`, `datacenter_orgs`) |
@@ -238,7 +294,7 @@ Two independent knobs, resolved as **query parameter > request header > admin de
 | `timezone` / `locale` / `density` | Asia/Shanghai / zh-CN / default | UI preferences |
 | `ip_allowlist` / `ip_denylist` | empty | IP/CIDR rules for echo traffic (deny wins; empty allowlist = allow all) |
 | `rate_limit_per_min` | 0 | per-IP per-minute cap on echo traffic (0 = off) |
-| `body_limit_kb` | 0 | echo request body cap (0 = off; over-limit returns 413) |
+| `body_limit_kb` | 0 | echo request body cap (0 = operator cap unset; a built-in 8 MB hard cap still applies; over-limit returns 413) |
 | `cors_origins` | empty | comma-separated allowed origins; unset keeps the legacy `*` echo behavior |
 | `security_headers` | true | extended security headers (`false` keeps only the baseline set) |
 | `maintenance_mode` / `maintenance_message` | false / empty | unauthenticated echo returns 503 while the console/API stay up |
@@ -334,7 +390,7 @@ Two independent knobs, resolved as **query parameter > request header > admin de
 - Live verification: build, start on a port, `curl` for JSON/text/fields, SNI via `--resolve`, Go/curl/OpenSSL clients, a byte-level re-segmenting proxy to force TCP fragmentation, independent Python JA3/JA4 cross-checks, 30-way concurrent connections asserting each response carries its own ClientHello, and an old-vs-new binary comparison (the old implementation loses the hello under fragmentation and reports a previous connection's hello)
 
 ## Future Extensions
-- HTTP/2 fingerprinting (Akamai) and QUIC/HTTP3
+- QUIC / HTTP/3 fingerprinting (the HTTP/2 SETTINGS/PRIORITY/pseudo-order fingerprint already ships)
 - A hosted shared data service: every dataset's `remote` provider kind is already its client contract (JSON over
   HTTPS, ETag re-sync, disk cache, scheduled refresh) — a cloud server can publish any dataset a private
   deployment mounts
