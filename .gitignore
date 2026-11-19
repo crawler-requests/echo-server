@@ -5,9 +5,13 @@ server-url.txt
 echo-server.log
 *.db
 *.db-journal
+*.db-wal
+*.db-shm
 
 # 本地编译产物
 /echo-server
+/echo-server-full
+/echo-server-lite
 
 # 前端依赖与构建产物（发布时由构建流程生成并被 //go:embed 打入二进制）
 frontend/node_modules/
