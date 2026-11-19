@@ -9,6 +9,11 @@ version: 2
 
 project_name: echo-server-lite
 
+# Lite releases are tagged `lite-v1.0.0`, which GoReleaser cannot parse as
+# semver on its own; strip the `lite-` prefix so {{ .Version }} is 1.0.0.
+git:
+  tag_prefix: lite-v
+
 before:
   hooks:
     # //go:embed frontend/dist must resolve, but the lite build never serves
