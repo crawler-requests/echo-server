@@ -35,10 +35,13 @@ jobs:
           cache: true
 
       # //go:embed needs the directory to exist; the lite build never serves it.
+      # The placeholder must satisfy ui_embed_test (a module script under
+      # /ui/assets/), otherwise `go test ./...` in this job fails.
       - name: Provide embed placeholder
         run: |
-          mkdir -p frontend/dist
-          echo '<!doctype html><title>lite</title>' > frontend/dist/index.html
+          mkdir -p frontend/dist/assets
+          printf '%s\n' '<!doctype html><html><body><script type="module" src="/ui/assets/lite.js"></script></body></html>' > frontend/dist/index.html
+          printf '%s\n' '// lite build placeholder' > frontend/dist/assets/lite.js
 
       - name: Build lite binary
         run: |
