@@ -47,6 +47,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/crawler-requests/echo-server/safeurl"
 )
 
 // Kind is how a provider obtains its data.
@@ -158,6 +160,11 @@ func httpFetch(url, etag string) (FetchResult, error) {
 // (e.g. Authorization for a private cloud library). ETag values from the
 // server are captured for the next conditional request.
 func httpFetchWithHeaders(url, etag string, headers map[string]string) (FetchResult, error) {
+	// Reject the target up front so the error names the reason instead of
+	// surfacing as a dial failure deep in the refresh loop.
+	if err := safeurl.ValidateURL(url); err != nil {
+		return FetchResult{}, err
+	}
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return FetchResult{}, err
@@ -187,7 +194,10 @@ func httpFetchWithHeaders(url, etag string, headers map[string]string) (FetchRes
 	}
 }
 
-var sharedClient = &http.Client{Timeout: 15 * time.Second}
+// sharedClient is the fetch client for every remote provider. It dials through
+// safeurl so an operator-supplied URL cannot point the server at loopback,
+// RFC 1918 space or the cloud metadata service.
+var sharedClient = safeurl.Client(15 * time.Second)
 
 // MaskedHeader is what a status report shows in place of a header value.
 const MaskedHeader = "***"
@@ -240,6 +250,7 @@ type Manager[V, R any] struct {
 	description string
 	codec       Codec[V, R]
 	cacheDir    string
+	dataDir     string
 	saver       func([]ProviderConfig) error
 	loadConfig  func() (persisted, extra string)
 	stamp       func(V, string) V
@@ -256,6 +267,10 @@ type Manager[V, R any] struct {
 type Options[V, R any] struct {
 	Description string
 	CacheDir    string // remote/command caches land in <CacheDir>/<dataset>/<provider>.data
+	// DataDir confines `file` providers to this directory. Empty means the
+	// process-wide root (SetFileRoot); a Manager-level value lets an embedder
+	// run several datasets with independent sandboxes.
+	DataDir string
 	// Saver persists the full provider list after any change. Optional.
 	Saver func([]ProviderConfig) error
 	// LoadConfig returns the persisted config JSON and an optional extra JSON
@@ -277,6 +292,7 @@ func New[V, R any](name string, codec Codec[V, R], opts Options[V, R]) *Manager[
 		description: opts.Description,
 		codec:       codec,
 		cacheDir:    opts.CacheDir,
+		dataDir:     opts.DataDir,
 		saver:       opts.Saver,
 		loadConfig:  opts.LoadConfig,
 		stamp:       opts.Stamp,
@@ -424,15 +440,16 @@ func (m *Manager[V, R]) acceptLocked(p *provider[V], vals []V) {
 
 // readFileParts loads one file, or every decodable file in a directory.
 func (m *Manager[V, R]) readFileParts(cfg ProviderConfig) ([]V, error) {
-	if cfg.Path == "" {
-		return nil, errors.New("no path given")
-	}
-	fi, err := os.Stat(cfg.Path)
+	path, err := checkFileUnder(cfg.Path, m.fileRoot())
 	if err != nil {
-		return nil, fmt.Errorf("stat %s: %w", cfg.Path, err)
+		return nil, err
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		return nil, fmt.Errorf("stat %s: %w", path, err)
 	}
 	if !fi.IsDir() {
-		data, err := os.ReadFile(cfg.Path)
+		data, err := os.ReadFile(path)
 		if err != nil {
 			return nil, fmt.Errorf("read %s: %w", cfg.Path, err)
 		}
@@ -442,7 +459,7 @@ func (m *Manager[V, R]) readFileParts(cfg ProviderConfig) ([]V, error) {
 		}
 		return []V{v}, nil
 	}
-	entries, err := os.ReadDir(cfg.Path)
+	entries, err := os.ReadDir(path)
 	if err != nil {
 		return nil, err
 	}
@@ -451,7 +468,7 @@ func (m *Manager[V, R]) readFileParts(cfg ProviderConfig) ([]V, error) {
 		if e.IsDir() || strings.HasPrefix(e.Name(), ".") {
 			continue
 		}
-		data, err := os.ReadFile(filepath.Join(cfg.Path, e.Name()))
+		data, err := os.ReadFile(filepath.Join(path, e.Name()))
 		if err != nil {
 			return nil, err
 		}
@@ -602,13 +619,24 @@ func (m *Manager[V, R]) Upsert(cfg ProviderConfig) (ProviderStatus, error) {
 		return ProviderStatus{}, errors.New("the builtin provider cannot be modified")
 	}
 	switch cfg.Kind {
-	case KindFile:
-		if cfg.Path == "" {
-			return ProviderStatus{}, errors.New("a file provider needs a path")
-		}
 	case KindRemote:
 		if cfg.URL == "" {
 			return ProviderStatus{}, errors.New("a remote provider needs a url")
+		}
+		// Reject private/loopback/metadata targets at save time. A custom
+		// scheme (s3://, …) has no notion of these ranges, so only the default
+		// http(s) transport is checked.
+		if strings.HasPrefix(cfg.URL, "http://") || strings.HasPrefix(cfg.URL, "https://") {
+			if err := safeurl.ValidateURL(cfg.URL); err != nil {
+				return ProviderStatus{}, err
+			}
+		}
+	case KindFile:
+		// Confine reads to the data directory: a raw path here is an
+		// arbitrary-file-read primitive. CheckFilePath also rejects an empty
+		// path, so this replaces the old bare "needs a path" check.
+		if _, err := checkFileUnder(cfg.Path, m.fileRoot()); err != nil {
+			return ProviderStatus{}, err
 		}
 	case KindCommand:
 		if cfg.Command == "" {
@@ -711,6 +739,15 @@ func (m *Manager[V, R]) Upsert(cfg ProviderConfig) (ProviderStatus, error) {
 		log.Printf("datasets/%s: persist failed: %v", m.name, err)
 	}
 	return st, nil
+}
+
+// fileRoot is the sandbox root for this Manager: its own DataDir when set,
+// otherwise the process-wide default.
+func (m *Manager[V, R]) fileRoot() string {
+	if m.dataDir != "" {
+		return m.dataDir
+	}
+	return FileRoot()
 }
 
 // Delete removes a custom provider.

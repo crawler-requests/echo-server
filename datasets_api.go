@@ -71,10 +71,25 @@ func envDatasetConfig(name string) string {
 	return ""
 }
 
+// datasetFileRoot is where file providers may read from. Operators mounting
+// their tables elsewhere set ECHO_SERVER_DATA_DIR; the default is the dataset
+// cache directory, so a stock install has a sane sandbox out of the box.
+func datasetFileRoot() string {
+	if d := os.Getenv("ECHO_SERVER_DATA_DIR"); d != "" {
+		return d
+	}
+	return datasetCacheDir()
+}
+
 // initAllDatasets creates the data sets, attaches embedded defaults, loads
 // persisted/环境 providers and starts background refresh loops. Called once
 // from main before serving.
 func initAllDatasets() {
+	// Install the file-provider sandbox before any dataset loads its config.
+	// Tests set their own root first; do not overwrite it.
+	if datasets.FileRoot() == "" {
+		datasets.SetFileRoot(datasetFileRoot())
+	}
 	initJA4Dataset()
 	initCIDRDatasets()
 	initOrgDataset()

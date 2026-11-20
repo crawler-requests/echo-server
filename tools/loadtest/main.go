@@ -13,8 +13,8 @@
 //
 // Usage:
 //
-//	go run ./tools/loadtest -mode hold  -c 100000 -addr 127.0.0.1:8080 -la 127.0.0.1,127.0.0.2
-//	go run ./tools/loadtest -mode drive -c 100000 -addr 127.0.0.1:8080 -path /ip -la ...
+//	go run ./tools/loadtest -mode hold  -c 100000 -addr 127.0.0.1:23231 -la 127.0.0.1,127.0.0.2
+//	go run ./tools/loadtest -mode drive -c 100000 -addr 127.0.0.1:23231 -path /ip -la ...
 //
 // -la spreads connections across local source IPs. Without it a single host
 // caps out at roughly 64k *outgoing* connections (one port range per source
@@ -39,7 +39,7 @@ import (
 func main() {
 	mode := flag.String("mode", "drive", "hold (keep sockets open) or drive (keep sending requests)")
 	conns := flag.Int("c", 1000, "number of concurrent connections")
-	addr := flag.String("addr", "127.0.0.1:8080", "host:port of the server")
+	addr := flag.String("addr", "127.0.0.1:23231", "host:port of the server")
 	path := flag.String("path", "/ip", "request path")
 	tlsOn := flag.Bool("tls", false, "use TLS")
 	insecure := flag.Bool("k", true, "skip certificate verification (self-signed)")

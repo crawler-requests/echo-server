@@ -10,6 +10,7 @@ import {
   message,
   Progress,
   Row,
+  Segmented,
   Space,
   Spin,
   Statistic,
@@ -103,6 +104,7 @@ const Access: React.FC = () => {
   const enabledKeys = keys.filter(k => k.enabled);
   const activeChecks = [
     { label: requireToken, text: '回显接口要求 Token' },
+    { label: (cfg.agent_access || 'token') !== 'public', text: 'Agent 工具需要凭证' },
     { label: tokenVisible && apiToken.length >= 32, text: '共享 Token 长度 ≥ 32' },
     { label: enabledKeys.length > 0, text: '已创建命名 API Key' },
     { label: cfg.allow_registration !== 'true', text: '自助注册已关闭' },
@@ -114,6 +116,7 @@ const Access: React.FC = () => {
     try {
       await postJSON('/api/config', token, {
         require_token: requireToken ? 'true' : 'false',
+        agent_access: cfg.agent_access || 'token',
         api_token: apiToken === '***' ? '' : apiToken,
       });
       message.success('访问控制已保存');
@@ -214,6 +217,33 @@ defer resp.Body.Close()`,
 
         <Row gutter={[16, 16]}>
           <Col xs={24} xl={15}>
+            <Card title="Agent 访问策略" style={{ marginBottom: 16 }}>
+              <div style={{ marginBottom: 12 }}>
+                <div className="s-title">MCP 工具与 /ip 的鉴权级别</div>
+                <div className="s-desc">
+                  Agent 通过 MCP（<Text code>echo-server mcp</Text>）调用本服务，或直接请求 <Text code>/ip</Text>。
+                  这里决定它们需要什么凭证。
+                </div>
+              </div>
+              <Segmented
+                block
+                disabled={!canEdit}
+                value={cfg.agent_access || 'token'}
+                onChange={v => setCfg(prev => ({ ...prev, agent_access: String(v) }))}
+                options={[
+                  { value: 'public', label: '公开 · 无需凭证' },
+                  { value: 'token', label: '需凭证 · JWT / API Key' },
+                  { value: 'admin_token', label: '仅管理员凭证' },
+                ]}
+              />
+              <p className="section-note">
+                <Text strong>公开</Text>：任何能访问端口的人都能查自己的出网 IP 与指纹，适合内网测试环境。
+                <Text strong>需凭证</Text>（默认）：任意角色的 JWT 或 API Key 均可读，写入类工具（如签发重置令牌）仍需管理员。
+                <Text strong>仅管理员凭证</Text>：所有 Agent 调用都要求 admin 作用域的 Key 或管理员 JWT，适合需要全量审计的部署。
+                保存后立即生效，与上方的 /echo 鉴权开关相互独立。
+              </p>
+            </Card>
+
             <Card title="回显接口鉴权">
               <div className="setting-tile" style={{ marginBottom: 18 }}>
                 <div>

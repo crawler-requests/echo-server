@@ -492,7 +492,8 @@ func TestURLUserinfoMaskedAndPreserved(t *testing.T) {
 
 func TestFileHotReload(t *testing.T) {
 	ResetRegistryForTest()
-	path := writeFile(t, "lib.txt", "v1")
+	dir := t.TempDir()
+	path := writeFile(t, filepath.Join(dir, "lib.txt"), "v1")
 	old := time.Now().Add(-time.Hour)
 	if err := os.Chtimes(path, old, old); err != nil {
 		t.Fatal(err)

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Button, Card, Form, Input, message, Tabs, Tag, Typography } from 'antd';
-import { LockOutlined, UserOutlined } from '@ant-design/icons';
+import { KeyOutlined, LockOutlined, UserOutlined } from '@ant-design/icons';
 import { api, errorText } from '../api';
 import AuthShell from '../components/AuthShell';
 
@@ -9,7 +9,7 @@ interface Props {
   registrationOpen?: boolean;
 }
 
-type Mode = 'login' | 'register';
+type Mode = 'login' | 'register' | 'recover';
 
 const Login: React.FC<Props> = ({ onLogin, registrationOpen = false }) => {
   const [mode, setMode] = useState<Mode>('login');
@@ -49,6 +49,46 @@ const Login: React.FC<Props> = ({ onLogin, registrationOpen = false }) => {
       </Form.Item>
       <Button type="primary" htmlType="submit" block loading={loading} style={{ height: 44 }}>
         登录控制台
+      </Button>
+      <Button type="link" block onClick={() => setMode('recover')} style={{ marginTop: 6 }}>
+        忘记密码？
+      </Button>
+    </Form>
+  );
+
+  // Self-service recovery: the user pastes the one-time token an admin gave
+  // them. There is no email channel in a self-hosted product, so the token is
+  // delivered out of band — but the redemption itself is fully self-service.
+  const recoverForm = (
+    <Form
+      layout="vertical"
+      size="large"
+      onFinish={values =>
+        submit('/api/password/redeem', { token: values.token, password: values.password })
+      }
+    >
+      <Form.Item
+        name="token"
+        label="重置令牌"
+        rules={[{ required: true, message: '请粘贴管理员发给你的重置令牌' }]}
+      >
+        <Input prefix={<KeyOutlined />} placeholder="epr_…" autoFocus />
+      </Form.Item>
+      <Form.Item
+        name="password"
+        label="新密码"
+        rules={[{ required: true, message: '请输入新密码' }, { min: 5, max: 128, message: '密码长度为 5-128 个字符' }]}
+      >
+        <Input.Password prefix={<LockOutlined />} placeholder="至少 5 个字符" autoComplete="new-password" />
+      </Form.Item>
+      <Button type="primary" htmlType="submit" block loading={loading} style={{ height: 44 }}>
+        重置并登录
+      </Button>
+      <Typography.Paragraph type="secondary" style={{ fontSize: 12, margin: '14px 0 0' }}>
+        令牌一次性有效、30 分钟内过期。没有令牌的话，请联系管理员在「用户管理」里为你的账号生成一个。
+      </Typography.Paragraph>
+      <Button type="link" block onClick={() => setMode('login')} style={{ marginTop: 4 }}>
+        返回登录
       </Button>
     </Form>
   );
@@ -105,16 +145,22 @@ const Login: React.FC<Props> = ({ onLogin, registrationOpen = false }) => {
     <AuthShell>
       <Card style={{ borderRadius: 16 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-          <h2>{mode === 'login' ? '欢迎回来' : '创建账号'}</h2>
+          <h2>{mode === 'recover' ? '重置密码' : mode === 'login' ? '欢迎回来' : '创建账号'}</h2>
           <Tag color={registrationOpen ? 'green' : 'default'} style={{ marginInlineEnd: 0 }}>
             {registrationOpen ? '开放注册' : '仅授权账号'}
           </Tag>
         </div>
         <p className="auth-sub">
-          {mode === 'login' ? '登录 Echo Server 管理控制台' : '注册一个只读账号，随时可由管理员提升权限'}
+          {mode === 'recover'
+            ? '用管理员发给你的一次性令牌设置新密码'
+            : mode === 'login'
+              ? '登录 Echo Server 管理控制台'
+              : '注册一个只读账号，随时可由管理员提升权限'}
         </p>
 
-        {registrationOpen ? (
+        {mode === 'recover' ? (
+          recoverForm
+        ) : registrationOpen ? (
           <Tabs
             activeKey={mode}
             onChange={key => setMode(key as Mode)}

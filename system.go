@@ -21,6 +21,14 @@ var (
 
 var serverStarted = time.Now()
 
+// Deliberately uncommon default ports: 8080/8443 collide with almost every
+// other local service (dev servers, proxies, other tools). Both are overridable
+// with PORT / HTTP_PORT.
+const (
+	defaultHTTPSPort = "23232"
+	defaultHTTPPort  = "23231"
+)
+
 // systemHandler reports build/runtime facts and the active listener setup.
 func systemHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -36,11 +44,11 @@ func systemHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	httpsPort := os.Getenv("PORT")
 	if httpsPort == "" {
-		httpsPort = "8443"
+		httpsPort = defaultHTTPSPort
 	}
 	httpPort := os.Getenv("HTTP_PORT")
 	if httpPort == "" {
-		httpPort = "8080"
+		httpPort = defaultHTTPPort
 	}
 	writeJSON(w, map[string]any{
 		"version":        serverVersion,

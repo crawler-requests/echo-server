@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.0.1] - 2026-11-20
+
 ### Added
 
 - `anycast` in the normalized IP-intel fields (ipinfo.io supplies it); when true, city/coordinates are not
@@ -62,6 +64,47 @@ All notable changes to this project are documented here. The format follows
   sync, English is the default.
 - **Release pipeline**: the full release now smoke-tests the built binary (`/ip`, `/echo`, console page,
   `/api/login`) before publishing; CI gained a lite-mode smoke test (no database, `/ui` and `/api` 404).
+
+- **Password recovery** (previously missing entirely): an admin can issue a one-time, 30-minute
+  reset token from *用户管理* (plaintext shown once, SHA-256 stored, single use, reissue supersedes),
+  and the user redeems it at `/ui/` under **忘记密码？**; plus an offline
+  `./echo-server -reset-password -user <name>` for the locked-out case, which needs local database
+  access, re-enables a disabled account, and audits as `password.reset.offline`.
+
+- **MCP server** (`echo-server mcp`): an in-binary Model Context Protocol server over stdio that exposes
+  all capabilities as agent tools — health, own egress IP, self fingerprint (client/JA3/JA4/h2/spoof),
+  IP lookup, JA4 search, query-log audit, traffic stats, provider health, and admin-only password-reset
+  issuance. It is a client of the running deployment, so auth/audit/rate-limit/query-log semantics are
+  unchanged; no MCP SDK dependency (JSON-RPC 2.0 is implemented directly).
+- **Claude Code skill** (`skills/echo-server/SKILL.md`): when to use each MCP tool, how to read
+  `spoofed` / `connection_type` / `anycast`, and common tasks.
+
+- **Agent access policy** (`agent_access`): admins choose whether MCP tools and `/ip` are `public`,
+  need any `token` (default) or need an `admin_token`, independently of `/echo`'s `require_token`.
+  Refusals carry `WWW-Authenticate` plus a JSON body naming the policy and where to change it.
+- **Fixed**: `/ip` was registered bare and bypassed `require_token` entirely; it now runs through the
+  agent gate, which defaults to credential-required.
+
+### Security
+
+- **SSRF fixed**: IP-provider and dataset `remote` URLs are now validated against loopback, RFC 1918,
+  link-local (including the cloud metadata address `169.254.169.254`) and other non-public ranges, at
+  save time and again at dial time (which also closes DNS rebinding). Redirects are re-checked per hop.
+  New `safeurl` package is the single policy both engines use.
+- **Arbitrary file read fixed**: `file` data sources were passed straight to `os.ReadFile`, so an admin
+  (or a viewer mistakenly promoted) could read `/etc/passwd`, `/proc/self/environ` or an SSH key through
+  the dataset API. File providers are now confined to a data directory (`ECHO_SERVER_DATA_DIR`, default
+  the dataset cache dir), with symlink-escape and `..` traversal rejected.
+- **Username enumeration fixed**: an unknown username returned in ~0.4 ms while a known one took ~30 ms,
+  a 60x timing difference that revealed which accounts exist. Authentication now performs the same
+  PBKDF2 work for a missing account.
+- `/ip` no longer bypasses `require_token` (it runs through the `agent_access` gate).
+
+### Changed
+
+- Default ports are now **23231** (plain HTTP / console) and **23232** (HTTPS / TLS echo) instead of
+  8080/8443, which collide with most local dev servers and proxies. `PORT` and `HTTP_PORT` still
+  override them; the Docker image, CI, docs and `make loadtest` were updated to match.
 
 ### Performance
 
@@ -136,5 +179,6 @@ First public release. One self-contained Go binary with the React console embedd
 - **Build & release** — `Makefile`, `//go:embed` single binary, GoReleaser (6 platform targets,
   archives, checksums), GitHub Actions CI and tag-triggered releases, Dockerfile.
 
-[Unreleased]: https://github.com/crawler-requests/echo-server/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/crawler-requests/echo-server/compare/v0.0.1...HEAD
+[0.0.1]: https://github.com/crawler-requests/echo-server/releases/tag/v0.0.1
 [1.0.0]: https://github.com/crawler-requests/echo-server/releases/tag/v1.0.0

@@ -39,7 +39,7 @@ COPY --from=build /out/echo-server /usr/local/bin/echo-server
 USER echo
 ENV ECHO_SERVER_DB=/data/echo.db
 VOLUME ["/data"]
-EXPOSE 8080 8443
+EXPOSE 23231 23232
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s \
-  CMD wget -qO- http://127.0.0.1:8080/health || exit 1
+  CMD wget -qO- http://127.0.0.1:23231/health || exit 1
 ENTRYPOINT ["echo-server"]

@@ -34,6 +34,20 @@ func initExtraDB() {
 			// connection type/country.
 			`CREATE INDEX IF NOT EXISTS idx_audit_username ON audit_log(username)`,
 			`CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action)`,
+			// Single-use, expiring password-recovery tokens. The plaintext is
+			// returned once when an admin issues it; only its SHA-256 is stored
+			// (same contract as API keys), so a stolen database cannot mint a
+			// working reset link.
+			`CREATE TABLE IF NOT EXISTS password_resets (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				username TEXT NOT NULL,
+				token_hash TEXT NOT NULL UNIQUE,
+				created_at TEXT NOT NULL,
+				expires_at TEXT NOT NULL,
+				used_at TEXT NOT NULL DEFAULT '',
+				issued_by TEXT NOT NULL DEFAULT ''
+			)`,
+			`CREATE INDEX IF NOT EXISTS idx_password_resets_user ON password_resets(username)`,
 			`CREATE TABLE IF NOT EXISTS api_keys (
 				id INTEGER PRIMARY KEY AUTOINCREMENT,
 				name TEXT NOT NULL UNIQUE,
@@ -355,3 +369,12 @@ func savedViewHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 var errNoRows = errors.New("no rows")
+
+// RecordAuditDirect writes an audit row for an action that happened outside an
+// HTTP request (the offline password reset). It takes the actor from the
+// environment rather than a request context.
+func RecordAuditDirect(action, target, detail string) {
+	initExtraDB()
+	_, _ = db.Exec(`INSERT INTO audit_log(ts, username, action, target, detail, ip) VALUES(?,?,?,?,?,?)`,
+		time.Now().UTC().Format(time.RFC3339), "offline:"+currentOSUser(), action, target, detail, "local")
+}

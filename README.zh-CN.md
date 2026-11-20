@@ -40,18 +40,18 @@ Webhook、日志筛选视图、Prometheus 指标与 OpenAPI 文档。
    （产物命名：echo-server_<version>_<os>_<arch>.tar.gz，Windows 为 .zip）。
    对照 checksums.txt 校验后解压。
 2. 启动：ECHO_SERVER_DB=./echo.db ECHO_SERVER_ADMIN_USERNAME=admin \
-        ECHO_SERVER_ADMIN_PASSWORD='<随机强密码>' PORT=8443 HTTP_PORT=8080 ./echo-server
+        ECHO_SERVER_ADMIN_PASSWORD='<随机强密码>' PORT=23232 HTTP_PORT=23231 ./echo-server
    用 nohup/systemd 托管，并确认进程存活 10 秒。
 3. 验收测试——全部通过才算完成：
-   - curl -sf http://127.0.0.1:8080/health            -> {"status":"ok"}
-   - curl -sf http://127.0.0.1:8080/ip                -> 含 "ip" 的 JSON
-   - curl -sf http://127.0.0.1:8080/ip?format=text    -> 一个纯 IP
-   - curl -sf -k https://127.0.0.1:8443/echo | head   -> 含 "headers" 与 "client_hello" 的 JSON
-   - curl -sf -k -H 'User-Agent: curl/8.5.0' https://127.0.0.1:8443/echo?fields=client
+   - curl -sf http://127.0.0.1:23231/health            -> {"status":"ok"}
+   - curl -sf http://127.0.0.1:23231/ip                -> 含 "ip" 的 JSON
+   - curl -sf http://127.0.0.1:23231/ip?format=text    -> 一个纯 IP
+   - curl -sf -k https://127.0.0.1:23232/echo | head   -> 含 "headers" 与 "client_hello" 的 JSON
+   - curl -sf -k -H 'User-Agent: curl/8.5.0' https://127.0.0.1:23232/echo?fields=client
                                                       -> "client.name" 为 curl（或同类）
-   - curl -sf http://127.0.0.1:8080/ui/ | grep 'id="root"'   -> 控制台页面可加载
+   - curl -sf http://127.0.0.1:23231/ui/ | grep 'id="root"'   -> 控制台页面可加载
    - 用管理员凭据 POST /api/login 能拿到 JWT。
-4. 打印控制台 URL（http://<lan-ip>:8080/ui/）与管理员用户名。
+4. 打印控制台 URL（http://<lan-ip>:23231/ui/）与管理员用户名。
 汇报：执行的命令、每项测试输出、URL。任何一项失败都要先修好再汇报。
 ```
 
@@ -64,13 +64,13 @@ Webhook、日志筛选视图、Prometheus 指标与 OpenAPI 文档。
 1. 下载极速版 release：纯语义化 tag（`1.x.y`，无 `v` 前缀），产物
    echo-server-lite_<version>_<os>_<arch>.tar.gz，校验 checksums 后解压。
 2. 完全不使用数据库启动：
-     ECHO_SERVER_LITE=1 PORT=8443 HTTP_PORT=8080 ./echo-server-lite
+     ECHO_SERVER_LITE=1 PORT=23232 HTTP_PORT=23231 ./echo-server-lite
 3. 验收测试——全部通过才算完成：
-   - curl -sf http://127.0.0.1:8080/ip                -> 含 "ip" 的 JSON
-   - curl -sf http://127.0.0.1:8080/ip?format=text    -> 一个纯 IP
-   - curl -sf http://127.0.0.1:8080/echo?fields=ip.ip -> 含 ip 的 JSON
-   - curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/ui/        -> 404
-   - curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/api/config -> 404
+   - curl -sf http://127.0.0.1:23231/ip                -> 含 "ip" 的 JSON
+   - curl -sf http://127.0.0.1:23231/ip?format=text    -> 一个纯 IP
+   - curl -sf http://127.0.0.1:23231/echo?fields=ip.ip -> 含 ip 的 JSON
+   - curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:23231/ui/        -> 404
+   - curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:23231/api/config -> 404
    - 工作目录中不出现 *.db / *.db-wal 文件。
    - 连续 1000 次请求全部返回 200（循环 curl -sf）。
 4. 提高文件句柄上限（ulimit -n 1048576）并在汇报中注明——这是它能承载约 10 万连接的前提。
@@ -84,7 +84,7 @@ Webhook、日志筛选视图、Prometheus 指标与 OpenAPI 文档。
 ```text
 验证 echo-server 极速版在这台机器上真的能承载 10 万个并发连接。
 
-1. 启动：ECHO_SERVER_LITE=1 PORT=8443 HTTP_PORT=8080 ./echo-server &
+1. 启动：ECHO_SERVER_LITE=1 PORT=23232 HTTP_PORT=23231 ./echo-server &
    （或在代码仓库里 go run .）
 2. 应用测试所需的内核限制：
      sudo sysctl -w net.core.somaxconn=65535 net.ipv4.tcp_max_syn_backlog=65535
@@ -93,11 +93,11 @@ Webhook、日志筛选视图、Prometheus 指标与 OpenAPI 文档。
 3. 把客户端源端口分散到多个回环地址（单个源 IP 只有约 6.4 万个出站端口，这是客户端限制）：
      for ip in 127.0.0.2 127.0.0.3 127.0.0.4 127.0.0.5; do sudo ip addr add $ip/8 dev lo; done
 4. 保持连接：
-     go run ./tools/loadtest -mode hold -c 100000 -addr 127.0.0.1:8080 \
+     go run ./tools/loadtest -mode hold -c 100000 -addr 127.0.0.1:23231 \
        -la 127.0.0.1,127.0.0.2,127.0.0.3,127.0.0.4,127.0.0.5 -d 20s
    验收：dialed==100000、failed==0。运行期间读取服务端 RSS（ps -o rss），约为每连接 7-8 KB。
 5. 在同一批 10 万连接上持续发请求：
-     go run ./tools/loadtest -mode drive -c 100000 -path /ip -addr 127.0.0.1:8080 \
+     go run ./tools/loadtest -mode drive -c 100000 -path /ip -addr 127.0.0.1:23231 \
        -la 127.0.0.1,127.0.0.2,127.0.0.3,127.0.0.4,127.0.0.5 -d 12s
    验收：dialed==100000、failed==0、errs==0，且 rps > 100000。
 6. 清理：删除额外的回环地址（sudo ip addr del ...）并停止服务。
@@ -118,9 +118,9 @@ Webhook、日志筛选视图、Prometheus 指标与 OpenAPI 文档。
      go test ./... -race -count=1
 4. 做你的改动，重跑完整门槛，并补一个"没有该改动就会失败"的测试。
 5. 验证运行中的二进制，而不只是单元测试：
-     PORT=18443 HTTP_PORT=18080 ./echo-server &
-     curl -sf http://127.0.0.1:18080/ip
-     curl -sf -k https://127.0.0.1:18443/echo?fields=ja4,tls,client
+     PORT=@@KEEP_123232@@ HTTP_PORT=@@KEEP_123231@@ ./echo-server &
+     curl -sf http://127.0.0.1:@@KEEP_123231@@/ip
+     curl -sf -k https://127.0.0.1:@@KEEP_123232@@/echo?fields=ja4,tls,client
 汇报：diff 摘要、门槛输出、手工 curl 输出。
 ```
 
@@ -129,7 +129,7 @@ Webhook、日志筛选视图、Prometheus 指标与 OpenAPI 文档。
 ```text
 启动 echo-server，用多种客户端探测，观察指纹面。
 
-1. 构建并运行：make build && PORT=8443 HTTP_PORT=8080 ./echo-server &
+1. 构建并运行：make build && PORT=23232 HTTP_PORT=23231 ./echo-server &
 2. 对以下每个客户端，抓取 /echo?fields=client,ja4,tls,http2,ip 的响应，汇总 name、family、
    JA4、HTTP/2 指纹与 UA 伪装检测结果：
      curl、wget、python -c 'import requests; requests.get(...)'、node、go net/http、
@@ -143,7 +143,7 @@ Webhook、日志筛选视图、Prometheus 指标与 OpenAPI 文档。
 
 ```bash
 make build                       # 先构建 frontend/dist，再内嵌进 ./echo-server
-PORT=8443 ./echo-server          # HTTPS（TLS 指纹）+ 明文 HTTP 控制台 :8080
+PORT=23232 ./echo-server          # HTTPS（TLS 指纹）+ 明文 HTTP 控制台 :23231
 ```
 
 `make build` 会先在 `frontend/` 执行 `npm ci && npm run build`，然后 `go build`。控制台通过
@@ -151,16 +151,16 @@ PORT=8443 ./echo-server          # HTTPS（TLS 指纹）+ 明文 HTTP 控制台 
 不需要 Node 运行时、也不需要反向代理。手动构建前端？请先执行
 `cd frontend && npm ci && npm run build` 再 `go build`，否则二进制里会嵌入旧界面。
 
-管理控制台默认通过 **8080 端口的明文 HTTP** 提供，打开 `http://HOST:8080/ui/` 无需信任自签名证书。
-`PORT`（默认 8443）上的 HTTPS 监听器提供同一套 UI/API，**并**捕获明文 HTTP 拿不到的 TLS
-ClientHello/JA3/JA4。可用 `HTTP_PORT=8080` 修改明文端口，或 `HTTP_PORT=0` 关闭它、只保留 HTTPS。
+管理控制台默认通过 **23231 端口的明文 HTTP** 提供，打开 `http://HOST:23231/ui/` 无需信任自签名证书。
+`PORT`（默认 23232）上的 HTTPS 监听器提供同一套 UI/API，**并**捕获明文 HTTP 拿不到的 TLS
+ClientHello/JA3/JA4。可用 `HTTP_PORT=23231` 修改明文端口，或 `HTTP_PORT=0` 关闭它、只保留 HTTPS。
 
 ### 使用 Docker 运行
 
 ```bash
 docker build -t echo-server .
 docker run -d --name echo-server \
-  -p 8080:8080 -p 8443:8443 \
+  -p 23231:23231 -p 23232:23232 \
   -v echo-data:/data \
   -e ECHO_SERVER_ADMIN_USERNAME=admin \
   -e ECHO_SERVER_ADMIN_PASSWORD='change-me-please' \
@@ -197,14 +197,14 @@ sudo sysctl -w net.ipv4.ip_local_port_range="1024 65535"   # 仅客户端侧
 ulimit -n 1048576
 
 # 1) 启动极速版
-ECHO_SERVER_LITE=1 PORT=8443 HTTP_PORT=8080 ./echo-server &
+ECHO_SERVER_LITE=1 PORT=23232 HTTP_PORT=23231 ./echo-server &
 
 # 2) 保持 10 万连接（测每连接内存）
-go run ./tools/loadtest -mode hold -c 100000 -addr 127.0.0.1:8080 \
+go run ./tools/loadtest -mode hold -c 100000 -addr 127.0.0.1:23231 \
   -la 127.0.0.1,127.0.0.2,127.0.0.3,127.0.0.4,127.0.0.5 -d 20s
 
 # 3) 在 10 万连接上持续发请求（测吞吐）
-go run ./tools/loadtest -mode drive -c 100000 -path /ip -addr 127.0.0.1:8080 \
+go run ./tools/loadtest -mode drive -c 100000 -path /ip -addr 127.0.0.1:23231 \
   -la 127.0.0.1,127.0.0.2,127.0.0.3,127.0.0.4,127.0.0.5 -d 12s
 ```
 
@@ -217,9 +217,9 @@ go run ./tools/loadtest -mode drive -c 100000 -path /ip -addr 127.0.0.1:8080 \
 指纹、客户端识别、地理查询、日志写入）。`GET /ip` 只回答这一个问题：
 
 ```bash
-curl -k https://HOST:8443/ip                   # {"ip":"203.0.113.42"}
-curl -k https://HOST:8443/ip?format=text       # 203.0.113.42
-curl -k http://HOST:8080/ip                    # 明文监听，完全不走 TLS
+curl -k https://HOST:23232/ip                   # {"ip":"203.0.113.42"}
+curl -k https://HOST:23232/ip?format=text       # 203.0.113.42
+curl -k http://HOST:23231/ip                    # 明文监听，完全不走 TLS
 ```
 
 它和 `/echo` 一样遵循 `X-Forwarded-For` / `X-Real-IP` / `CF-Connecting-IP`，返回
@@ -248,11 +248,11 @@ curl -k http://HOST:8080/ip                    # 明文监听，完全不走 TLS
 
 ```bash
 # 全量（默认）
-curl -k https://HOST:8443/echo
+curl -k https://HOST:23232/echo
 
 # 只要需要的字段，文本格式——响应最小
 curl -k -H 'X-Forwarded-For: 8.8.8.8' \
-  'https://HOST:8443/echo?format=text&fields=ip.country,ip.city,ip.latitude,ip.longitude,ip.connection_type'
+  'https://HOST:23232/echo?format=text&fields=ip.country,ip.city,ip.latitude,ip.longitude,ip.connection_type'
 # ip.city=San Jose
 # ip.connection_type=datacenter
 # ip.country=United States
@@ -260,10 +260,10 @@ curl -k -H 'X-Forwarded-For: 8.8.8.8' \
 # ip.longitude=-121.8949553
 
 # 同样的字段，JSON 格式
-curl -k 'https://HOST:8443/echo?format=json&fields=client_hello.sni,client_hello.ja3_hash,ip.asn,ip.org'
+curl -k 'https://HOST:23232/echo?format=json&fields=client_hello.sni,client_hello.ja3_hash,ip.asn,ip.org'
 
 # 只看客户端判定（谁在调用、UA 是否诚实）
-curl -k 'https://HOST:8443/echo?fields=client.name,client.family,client.spoofed,client.confidence'
+curl -k 'https://HOST:23232/echo?fields=client.name,client.family,client.spoofed,client.confidence'
 # {"client":{"confidence":0.88,"family":"cli","name":"curl","spoofed":true}}
 ```
 
@@ -345,7 +345,7 @@ curl -k 'https://HOST:8443/echo?fields=client.name,client.family,client.spoofed,
 矛盾时，请求会被标记 `spoofed: true`，**身份以 TLS 结果为准**，并在说明中列出双方证据：
 
 ```bash
-curl -k -A 'Mozilla/5.0 … Chrome/131.0.0.0 Safari/537.36' https://HOST:8443/echo?fields=client
+curl -k -A 'Mozilla/5.0 … Chrome/131.0.0.0 Safari/537.36' https://HOST:23232/echo?fields=client
 # {"client":{"name":"curl","family":"cli","spoofed":true,"confidence":0.88,
 #   "notes":["TLS fingerprint says curl (cli) but the User-Agent claims Chrome (browser) — the UA is very likely spoofed"]}}
 ```
@@ -387,30 +387,30 @@ Provider。
 
 ```bash
 # 列出所有数据集及其 Provider 和实时状态（条目数、观测数、上次同步、错误）
-curl -k -H "Authorization: Bearer $JWT" https://HOST:8443/api/datasets
+curl -k -H "Authorization: Bearer $JWT" https://HOST:23232/api/datasets
 # ……或只取一个数据集（返回对象而非数组）
-curl -k -H "Authorization: Bearer $JWT" 'https://HOST:8443/api/datasets?dataset=ja4'
+curl -k -H "Authorization: Bearer $JWT" 'https://HOST:23232/api/datasets?dataset=ja4'
 
 # 给 JA4 数据集添加本地库或目录（每 5 分钟监听变化）
 curl -k -X POST -H "Authorization: Bearer $JWT" -H 'Content-Type: application/json' \
   -d '{"name":"my-fp","kind":"file","priority":10,"path":"/data/my-ja4db.json","refresh_min":5}' \
-  'https://HOST:8443/api/datasets?dataset=ja4'
+  'https://HOST:23232/api/datasets?dataset=ja4'
 
 # 每 30 分钟拉取私有云库，用请求头认证
 curl -k -X POST -H "Authorization: Bearer $JWT" -H 'Content-Type: application/json' \
   -d '{"name":"cloud","kind":"remote","priority":20,"url":"https://cloud.example.com/ja4db.json",
        "headers":{"Authorization":"Bearer CLOUD_TOKEN"},"refresh_min":30}' \
-  'https://HOST:8443/api/datasets?dataset=ja4'
+  'https://HOST:23232/api/datasets?dataset=ja4'
 
 # 用任意脚本生成 datacenter CIDR 表（stdout 即数据）
 curl -k -X POST -H "Authorization: Bearer $JWT" -H 'Content-Type: application/json' \
   -d '{"name":"nightly","kind":"command","priority":10,"command":"/opt/gen-cidrs.sh","refresh_min":720}' \
-  'https://HOST:8443/api/datasets?dataset=datacenter_cidr'
+  'https://HOST:23232/api/datasets?dataset=datacenter_cidr'
 
 # 立即强制同步（整个数据集的所有 Provider，或 ?provider=NAME —— file Provider 会重新读取）；
 # DELETE 删除自定义 Provider
-curl -k -X POST -H "Authorization: Bearer $JWT" 'https://HOST:8443/api/datasets/sync?dataset=ja4&provider=my-fp'
-curl -k -X DELETE -H "Authorization: Bearer $JWT" 'https://HOST:8443/api/datasets?dataset=ja4&provider=cloud'
+curl -k -X POST -H "Authorization: Bearer $JWT" 'https://HOST:23232/api/datasets/sync?dataset=ja4&provider=my-fp'
+curl -k -X DELETE -H "Authorization: Bearer $JWT" 'https://HOST:23232/api/datasets?dataset=ja4&provider=cloud'
 ```
 
 JA4 云端契约就是 `tools/ja4dbgen` 写出的 `{meta, ja4}` JSON ——
@@ -440,7 +440,7 @@ JA4 云端契约就是 `tools/ja4dbgen` 写出的 `{meta, ja4}` JSON ——
 
 ```bash
 # 列出链路：配置（凭据已掩码）、顺序与实时统计
-curl -k -H "Authorization: Bearer $JWT" https://HOST:8443/api/ipproviders
+curl -k -H "Authorization: Bearer $JWT" https://HOST:23232/api/ipproviders
 
 # 追加付费云 API；优先级更高时会在内置 Provider 之前尝试
 curl -k -X POST -H "Authorization: Bearer $JWT" -H 'Content-Type: application/json' \
@@ -449,20 +449,20 @@ curl -k -X POST -H "Authorization: Bearer $JWT" -H 'Content-Type: application/js
        "headers":{"Authorization":"Bearer CLOUD_TOKEN"},
        "mapping":{"country":"data.country","city":"data.city","asn":"data.asn",
                   "is_proxy":"data.privacy.proxy","is_hosting":"data.privacy.hosting"}}' \
-  https://HOST:8443/api/ipproviders
+  https://HOST:23232/api/ipproviders
 
 # 把本地脚本（任意语言）作为链路的另一环
 curl -k -X POST -H "Authorization: Bearer $JWT" -H 'Content-Type: application/json' \
   -d '{"name":"local","kind":"command","enabled":true,"priority":-10,
        "command":"/opt/ipintel.sh {ip}","timeout_sec":3}' \
-  https://HOST:8443/api/ipproviders
+  https://HOST:23232/api/ipproviders
 
 # 不经过结果缓存，直接查询一个 IP
 curl -k -X POST -H "Authorization: Bearer $JWT" -H 'Content-Type: application/json' \
-  -d '{"ip":"8.8.8.8"}' https://HOST:8443/api/ipproviders/test
+  -d '{"ip":"8.8.8.8"}' https://HOST:23232/api/ipproviders/test
 
 # 删除自定义 Provider（内置项可禁用但不可删除）
-curl -k -X DELETE -H "Authorization: Bearer $JWT" 'https://HOST:8443/api/ipproviders?name=cloud'
+curl -k -X DELETE -H "Authorization: Bearer $JWT" 'https://HOST:23232/api/ipproviders?name=cloud'
 ```
 
 链路持久化在 SQLite 的 `ip_lookup_providers` 下，也可用 `IP_LOOKUP_PROVIDERS` 环境变量预置（JSON
@@ -560,6 +560,59 @@ Cobalt Strike beacon；`t13i190800_…` → Sliver Agent）能被识别，`famil
   （去掉 SNI/ALPN）12 位十六进制 + "_" + 签名算法>`。
 - **JA4_r / JA4_o** —— 相同布局但使用原始（未哈希）值：排序后（`_r`）与原始线上顺序（`_o`）。
 
+## 面向 Agent 的接入（MCP）
+
+本服务的全部能力都通过内置 **MCP server** 暴露给 agent：同一个二进制以 `echo-server mcp` 运行，
+用 stdio 传输 JSON-RPC 2.0——即 Claude Code、Codex 等 MCP 客户端使用的传输方式。它是对**运行中部署**
+的客户端，因此鉴权、审计、限流与查询日志全部沿用，不会绕过。
+
+```bash
+# 注册一次，之后 agent 就能调用下表中的工具
+claude mcp add echo-server \
+  --env ECHO_SERVER_URL=http://127.0.0.1:23231 \
+  --env ECHO_SERVER_API_KEY=esk_... \
+  -- /path/to/echo-server mcp
+```
+
+| 工具 | agent 能用它做什么 |
+|---|---|
+| `echo_server_health` | 确认部署在线 |
+| `echo_server_my_ip` | 取得自己的出网 IP（走极速 `/ip` 路径） |
+| `echo_server_self_fingerprint` | 看服务端如何识别自己——客户端名/类别、JA3/JA4、h2 指纹、UA 是否伪造；传入 `user_agent` 可测试伪装 |
+| `echo_server_lookup_ip` | 最多 100 个地址的地理/ASN/连接类型 |
+| `echo_server_search_ja4` | 检索指纹库（含恶意软件家族） |
+| `echo_server_query_log` | 按客户端/类别/伪造/国家审计流量 |
+| `echo_server_stats` | 流量形态：Top 客户端、伪造数、未识别客户端数 |
+| `echo_server_providers` | 哪个地理 Provider 在劣化 |
+| `echo_server_issue_password_reset` | 仅管理员：一次性重置令牌 |
+
+需要 TLS 指纹的工具（`self_fingerprint`、伪造检测）默认走 HTTPS；仅当 TLS 监听不可达时 MCP 客户端才回落到明文端口。明文 HTTP 无法给出 JA3/JA4 或伪造判定。
+
+配套的 Claude Code **Skill** 位于 [`skills/echo-server/SKILL.md`](skills/echo-server/SKILL.md)，说明了
+每个工具的使用时机、如何解读 `spoofed`/`connection_type`/`anycast`，以及常见任务。
+
+### 谁能调用 Agent 工具
+
+`agent_access`（访问控制 → Agent 访问策略）决定 MCP 工具与 `/ip` 需要的凭证，与管 `/echo` 的
+`require_token` 开关相互独立：
+
+| 取值 | 可调用者 |
+|---|---|
+| `public` | 任何能访问端口的人——适合内网临时测试端点 |
+| `token`（默认） | 任意角色的 JWT 或 API Key；写入类工具仍需管理员凭证 |
+| `admin_token` | 仅 admin 作用域的 Key 或管理员 JWT——需要每次查询都可归因时使用 |
+
+默认会拒绝匿名 `/ip`；此前该端点完全绕过了 `require_token`。拒绝时返回 401/403，带
+`WWW-Authenticate` 头与说明策略和修改位置的 JSON 体，agent 能据此自行恢复而不是靠猜。`echo-server mcp`
+也会在 `initialize` 握手中说明当前凭证状况，并在缺少管理员权限时用可读消息拒绝管理员专属工具。
+
+### 安全说明
+
+- 出站 URL（IP Provider、远端数据集）指向回环、RFC 1918、链路本地或云元数据地址时会被拒绝——在保存
+  Provider 时检查一次，并在每次拨号时再次检查。
+- `file` 数据源只能读取 `ECHO_SERVER_DATA_DIR`（默认：数据集缓存目录）内的文件。
+- 登录耗时会做均衡，响应时间无法用于判断账号是否存在。
+
 ## 管理 UI 与 API
 
 `/ui/` —— React + Ant Design 控制台，后端是 SQLite 用户系统。**全新安装没有账号，也没有默认
@@ -573,6 +626,30 @@ PBKDF2-SHA256（21 万次迭代）存储。JWT 签名密钥来自 `ECHO_SERVER_J
 隐藏/禁用编辑控件）。被禁用或删除的用户立即失去访问权（每个请求都会重新读取账号），最后一个启用的
 管理员不能被删除、禁用或降级。管理员在用户管理卡片控制*允许访客自助注册*（默认关闭）。关闭时只有
 管理员能创建账号；开启时登录页提供注册，所有自助注册账号都是 viewer。
+
+### 忘记密码后的找回
+
+密码哈希是单向的，忘记后只能**替换**、无法读回。两条路径对应两种真实场景：
+
+**1. 在线自助（还有管理员能登录）。** 在*用户管理*页，账号右侧的钥匙图标签发**一次性重置令牌**：
+
+- 32 字节熵，只显示一次（服务器只存其 SHA-256——即使数据库泄露也无法伪造可用令牌），
+- 30 分钟有效、一次性使用；为同一账号重新签发会让旧令牌失效，
+- 用户在 `/ui/` 点**忘记密码？**，粘贴令牌并设置新密码，随即自动登录，
+- 不依赖邮件（本产品没有 SMTP 依赖），令牌通过你们已有的私下渠道转交即可，
+- 签发与兑付都会写入审计日志，兑付按 TCP 对端限流。
+
+**2. 离线兜底（没人能登录，例如唯一的管理员忘了密码）。** 停掉服务，用重置模式直接操作数据库——这需要
+本机对数据库文件的访问权，正是这个操作应有的信任边界：
+
+```bash
+./echo-server -reset-password -user root -password '新的强密码'
+# 省略 -password 则无回显地交互输入：
+./echo-server -reset-password -user root
+```
+
+若账号被禁用会自动重新启用，可选 `-role`；不会把密码打回终端，并以发起命令的操作系统用户名记录
+`password.reset.offline` 审计。非默认路径时用 `ECHO_SERVER_DB` 指向正确的数据库。
 
 控制台是单页应用，带分组、可折叠侧边栏和 `Ctrl/⌘+K` 页面命令面板。每个分区都是独立路由
 （`/ui/users`、`/ui/logs`、……），因此链接与刷新都可用；服务端对无扩展名路径回退到 `index.html`，
@@ -689,22 +766,22 @@ PBKDF2-SHA256（21 万次迭代）存储。JWT 签名密钥来自 `ECHO_SERVER_J
 
 ```bash
 # 全新安装：从命令行创建第一个管理员（或使用 /ui/）
-JWT=$(curl -sk -X POST https://HOST:8443/api/setup -H 'Content-Type: application/json' \
+JWT=$(curl -sk -X POST https://HOST:23232/api/setup -H 'Content-Type: application/json' \
   -d '{"username":"owner","password":"a-long-password"}' | jq -r .token)
 
 # ……或已有安装：登录并保存 token
-JWT=$(curl -sk -X POST https://HOST:8443/api/login -H 'Content-Type: application/json' \
+JWT=$(curl -sk -X POST https://HOST:23232/api/login -H 'Content-Type: application/json' \
   -d '{"username":"owner","password":"a-long-password"}' | jq -r .token)
 
 # 创建只读账号，然后轮换自己的密码
 curl -k -X POST -H "Authorization: Bearer $JWT" -H 'Content-Type: application/json' \
-  -d '{"username":"alice","password":"alice-pass","role":"viewer"}' https://HOST:8443/api/users
+  -d '{"username":"alice","password":"alice-pass","role":"viewer"}' https://HOST:23232/api/users
 curl -k -X POST -H "Authorization: Bearer $JWT" -H 'Content-Type: application/json' \
-  -d '{"old_password":"a-long-password","new_password":"a-longer-pass"}' https://HOST:8443/api/me/password
+  -d '{"old_password":"a-long-password","new_password":"a-longer-pass"}' https://HOST:23232/api/me/password
 
 # 禁用账号（其现有 token 立即失效）
 curl -k -X POST -H "Authorization: Bearer $JWT" -H 'Content-Type: application/json' \
-  -d '{"username":"alice","disabled":true}' https://HOST:8443/api/users
+  -d '{"username":"alice","disabled":true}' https://HOST:23232/api/users
 ```
 
 ## IP 情报
@@ -714,15 +791,15 @@ IP 定位既可以通过 `/echo`（自动识别调用方自身的来源 IP），
 
 ```bash
 # 查询单个地址（单个结果直接返回 IP 对象）
-curl -k -H "Authorization: Bearer $JWT" 'https://HOST:8443/api/ip/lookup?ip=8.8.8.8'
+curl -k -H "Authorization: Bearer $JWT" 'https://HOST:23232/api/ip/lookup?ip=8.8.8.8'
 
 # 批量（最多 100 个，结果顺序与输入一致）；nocache=1 绕过结果缓存
 curl -k -H "Authorization: Bearer $JWT" -H 'Content-Type: application/json' \
-  -d '{"ips":["8.8.8.8","1.1.1.1","104.131.0.1"],"nocache":false}' https://HOST:8443/api/ip/lookup
+  -d '{"ips":["8.8.8.8","1.1.1.1","104.131.0.1"],"nocache":false}' https://HOST:23232/api/ip/lookup
 
 # 纯文本批量（每行一个或用逗号分隔）
 printf '8.8.8.8\n1.1.1.1\n' | curl -k -X POST -H "Authorization: Bearer $JWT" \
-  --data-binary @- https://HOST:8443/api/ip/lookup/bulk
+  --data-binary @- https://HOST:23232/api/ip/lookup/bulk
 ```
 
 - 默认具备离线能力：约 1.48 万个内嵌 datacenter 前缀（AWS/GCP/DigitalOcean/Oracle 官方列表、

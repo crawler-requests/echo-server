@@ -20,6 +20,7 @@ import {
   Switch,
   Table,
   Tag,
+  Tooltip,
   Typography,
 } from 'antd';
 import {
@@ -34,6 +35,7 @@ import {
   UserAddOutlined,
   UserOutlined,
   UserSwitchOutlined,
+  KeyOutlined,
 } from '@ant-design/icons';
 import { AuditEntry, Config, User, deleteJSON, errorText, fmtTime, getJSON, postJSON } from '../api';
 import { useApiError } from '../hooks';
@@ -181,6 +183,43 @@ const Users: React.FC = () => {
     }
   };
 
+  // Issue a one-time recovery token. The plaintext is shown exactly once in a
+  // modal; the server stores only a hash, so it cannot be re-displayed later.
+  const issueReset = async (u: User) => {
+    try {
+      const res = await postJSON<{ token: string; expires_at: string; expires_in: number }>(
+        '/api/password/reset',
+        token,
+        { username: u.username },
+      );
+      Modal.info({
+        title: `「${u.username}」的密码重置令牌`,
+        width: 620,
+        okText: '我已抄录',
+        content: (
+          <Space direction="vertical" size={10} style={{ width: '100%' }}>
+            <Alert
+              type="warning"
+              showIcon
+              message="只显示这一次"
+              description="服务器只保存令牌的哈希，关闭后无法再查看。请立即通过私下渠道发给对方。"
+            />
+            <Typography.Text className="mono" copyable style={{ wordBreak: 'break-all', fontSize: 13 }}>
+              {res.token}
+            </Typography.Text>
+            <Text type="secondary">
+              有效期至 {fmtTime(res.expires_at)}（约 {Math.round(res.expires_in / 60)} 分钟），一次性使用。
+              对方在登录页点「忘记密码？」粘贴即可自助重置。
+            </Text>
+          </Space>
+        ),
+      });
+      await load(true);
+    } catch (err) {
+      fail(err);
+    }
+  };
+
   return (
     <>
       <PageHeader
@@ -314,6 +353,9 @@ const Users: React.FC = () => {
                   render: (_: unknown, r: User) => (
                     <Space size={2}>
                       <Button size="small" type="text" icon={<EditOutlined />} onClick={() => openEdit(r)}>编辑</Button>
+                      <Tooltip title="生成一次性密码重置令牌">
+                        <Button size="small" type="text" icon={<KeyOutlined />} onClick={() => issueReset(r)} />
+                      </Tooltip>
                       <Popconfirm
                         title={`删除账号「${r.username}」？`}
                         description="该账号的登录令牌会立即失效。"

@@ -65,4 +65,4 @@ lite: ## Build the lite binary (no database; /ip and /echo only at runtime)
 
 loadtest: ## High-concurrency load test against a running lite server (CONNS=100000)
 	go run ./tools/loadtest -mode $(or $(MODE),drive) -c $(or $(CONNS),100000) \
-		-addr $(or $(ADDR),127.0.0.1:8080) -path $(or $(PATH),/ip) -la $(or $(LA),127.0.0.1)
+		-addr $(or $(ADDR),127.0.0.1:23231) -path $(or $(PATH),/ip) -la $(or $(LA),127.0.0.1)

@@ -51,6 +51,23 @@ var (
 	errRegistrationOff    = errors.New("self-registration is disabled")
 )
 
+// dummyPasswordHash is a well-formed PBKDF2 hash of a value that is never a
+// real credential. verifyPassword against it costs exactly what a real check
+// costs, which makes a missing username indistinguishable from a wrong password
+// by response timing.
+var dummyPasswordHash = func() string {
+	salt := make([]byte, 16)
+	if _, err := rand.Read(salt); err != nil {
+		for i := range salt {
+			salt[i] = byte(i)
+		}
+	}
+	key, _ := pbkdf2.Key(sha256.New, "not-a-real-password", salt, pbkdf2Iterations, 32)
+	return fmt.Sprintf("pbkdf2-sha256$%d$%s$%s", pbkdf2Iterations,
+		base64.RawStdEncoding.EncodeToString(salt),
+		base64.RawStdEncoding.EncodeToString(key))
+}()
+
 // initUsers bootstraps the first admin from the environment when requested.
 // A fresh installation normally starts empty: the console then shows a setup
 // page where the operator chooses their own admin username/password, so no
@@ -386,6 +403,11 @@ func AuthenticateUser(username, password string) (*User, error) {
 	u, err := GetUser(username)
 	if err != nil {
 		if errors.Is(err, errUserNotFound) {
+			// Spend the same PBKDF2 work a real account would, so response
+			// timing does not reveal whether the username exists. Without this,
+			// an unknown name returns in ~0.4 ms and a known one takes ~30 ms:
+			// a 60x difference that enumerates accounts.
+			verifyPassword(password, dummyPasswordHash)
 			return nil, errInvalidCredentials
 		}
 		return nil, err

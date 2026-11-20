@@ -326,8 +326,8 @@ Two independent knobs, resolved as **query parameter > request header > admin de
   JWT, UUID, password strength, curl, UA, HTTP status, regex)
 
 ### Listeners
-- `PORT` (default `8443`): HTTPS with per-connection ClientHello/JA3/JA4 capture; serves the full mux (echo, UI, APIs).
-- `HTTP_PORT` (default `8080`, `0`/`off` disables): plain HTTP serving the same mux. This is the default console entry point because a self-signed certificate otherwise blocks the browser; HTTP requests have no `tls` object and no ClientHello, so TLS fingerprint fields are empty there. TLS fingerprinting still requires the HTTPS listener.
+- `PORT` (default `23232`): HTTPS with per-connection ClientHello/JA3/JA4 capture; serves the full mux (echo, UI, APIs).
+- `HTTP_PORT` (default `23231`, `0`/`off` disables): plain HTTP serving the same mux. This is the default console entry point because a self-signed certificate otherwise blocks the browser; HTTP requests have no `tls` object and no ClientHello, so TLS fingerprint fields are empty there. TLS fingerprinting still requires the HTTPS listener.
 
 ### Data Flow
 0. Startup: `initAllDatasets` builds every dataset — embedded defaults attached, custom providers restored from

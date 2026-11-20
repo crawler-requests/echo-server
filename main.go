@@ -128,9 +128,23 @@ var (
 )
 
 func main() {
+	// Offline recovery runs before any listener starts: password hashes cannot
+	// be reversed, so a forgotten admin password is replaced by whoever holds
+	// local access to the database, never by the network surface.
+	if hasResetPasswordFlag(os.Args[1:]) {
+		runResetPassword()
+		return
+	}
+	// MCP mode: speak the Model Context Protocol on stdio so an AI agent can
+	// use this deployment as a tool set (see mcp.go). Same binary, no listener.
+	if hasMCPFlag(os.Args[1:]) {
+		runMCPServer()
+		return
+	}
+
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = "8443"
+		port = defaultHTTPSPort
 	}
 
 	// Generate and persist a self-signed cert
@@ -181,7 +195,10 @@ func main() {
 	lite := os.Getenv("ECHO_SERVER_LITE") == "1"
 	if lite {
 		mux.HandleFunc("/health", healthHandler)
-		mux.HandleFunc("/ip", ipOnlyHandler)
+		// Lite mode has no accounts, so /ip cannot be gated by a credential;
+		// access control there is the network boundary (agentAccess reports
+		// "public" when liteMode is set).
+		mux.HandleFunc("/ip", agentGateMiddleware(ipOnlyHandler))
 		mux.HandleFunc("/echo", echoHandler)
 		mux.HandleFunc("/metrics", prometheusHandler)
 		mux.HandleFunc("/ui/", func(w http.ResponseWriter, r *http.Request) {
@@ -201,6 +218,11 @@ func main() {
 		mux.HandleFunc("/api/setup", authThrottleMiddleware(setupHandler))
 		mux.HandleFunc("/api/register", authThrottleMiddleware(registerHandler))
 		mux.HandleFunc("/api/login", authThrottleMiddleware(loginHandler))
+		// Password recovery: an admin issues a one-time token (authenticated),
+		// the user redeems it without being logged in (the token is the
+		// credential) — the two halves of "forgot my password".
+		mux.HandleFunc("/api/password/reset", adminMiddleware(passwordResetHandler))
+		mux.HandleFunc("/api/password/redeem", resetThrottleMiddleware(passwordResetRedeemHandler))
 		// Account system: every authenticated user can read their own profile and
 		// rotate their password; only admins can manage other accounts.
 		mux.HandleFunc("/api/me", authMiddleware(meHandler))
@@ -261,7 +283,9 @@ func main() {
 		// Fast path: reply with the caller's egress IP and nothing else. Exists so
 		// IP-check workloads (proxy pools, crawler egress checks) do not pay for
 		// TLS parsing, client identification, geolocation or the query log.
-		mux.HandleFunc("/ip", ipOnlyHandler)
+		// /ip used to be registered bare, which silently bypassed
+		// require_token; route it through the agent policy instead.
+		mux.HandleFunc("/ip", agentGateMiddleware(ipOnlyHandler))
 
 		// Serve embedded React frontend under /ui. Unknown extension-less paths
 		// fall back to index.html so client-side routes survive a refresh
@@ -335,7 +359,7 @@ func main() {
 	// to disable it.
 	httpPort := os.Getenv("HTTP_PORT")
 	if httpPort == "" {
-		httpPort = "8080"
+		httpPort = defaultHTTPPort
 	}
 	var plainServer *http.Server
 	if httpPort != "0" && !strings.EqualFold(httpPort, "off") {
@@ -656,6 +680,7 @@ func configHandler(w http.ResponseWriter, r *http.Request) {
 			"enable_http2":             GetConfig("enable_http2"),
 			"github_repo":              GetConfig("github_repo"),
 			"require_token":            GetConfig("require_token"),
+			"agent_access":             effectiveAgentAccess(),
 			"allow_registration":       GetConfig("allow_registration"),
 			"enable_online_geo":        GetConfig("enable_online_geo"),
 			"geo_provider":             GetConfig("geo_provider"),

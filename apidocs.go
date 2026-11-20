@@ -21,6 +21,8 @@ var endpointDocs = []endpointDoc{
 	{"POST", "/api/setup", "创建第一个管理员", "账户", "public"},
 	{"POST", "/api/register", "自助注册只读账号", "账户", "public"},
 	{"POST", "/api/login", "登录并获取 JWT", "账户", "public"},
+	{"POST", "/api/password/reset", "签发一次性密码重置令牌", "账户", "admin"},
+	{"POST", "/api/password/redeem", "凭令牌自助重置密码", "账户", "public"},
 	{"GET", "/api/me", "当前账号资料", "账户", "user"},
 	{"POST", "/api/me/password", "修改自己的密码", "账户", "user"},
 	{"GET", "/api/users", "账号列表", "账户", "admin"},

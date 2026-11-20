@@ -12,11 +12,20 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/crawler-requests/echo-server/datasets"
+	"github.com/crawler-requests/echo-server/safeurl"
 )
 
 // TestMain points SQLite at a throwaway database so tests never touch the
 // operator's real ~/.echo-server/echo.db.
 func TestMain(m *testing.M) {
+	// HTTP tests stand up httptest servers on 127.0.0.1, which the production
+	// SSRF guard blocks on purpose; the override is test-only and process-wide.
+	safeurl.AllowPrivateForTests(true)
+	// File providers are sandboxed; tests write under t.TempDir() (a direct
+	// child of os.TempDir()), so that is the sandbox root here.
+	datasets.SetFileRoot(os.TempDir())
 	dir, err := os.MkdirTemp("", "echo-server-test-*")
 	if err != nil {
 		panic(err)

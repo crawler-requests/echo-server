@@ -40,6 +40,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/crawler-requests/echo-server/safeurl"
 )
 
 // Kind is how a provider produces an answer.
@@ -217,7 +219,7 @@ func (e *entry) resetStats() {
 // New creates an empty manager.
 func New(opts Options) *Manager {
 	if opts.HTTPClient == nil {
-		opts.HTTPClient = &http.Client{Timeout: 4 * time.Second}
+		opts.HTTPClient = safeurl.Client(4 * time.Second)
 	}
 	return &Manager{
 		opts:    opts,
@@ -361,6 +363,12 @@ func (m *Manager) buildLocked(cfg Config) (Provider, error) {
 		}
 		if !strings.Contains(cfg.URL, "{ip}") && !strings.Contains(cfg.URL, "{ip_raw}") {
 			return nil, errors.New(`an http provider url must contain {ip} or {ip_raw}`)
+		}
+		// Validate the URL as the operator wrote it (the placeholder is a
+		// query value, not the host), so a private/loopback target is rejected
+		// when the provider is saved rather than on the first lookup.
+		if err := safeurl.ValidateURL(strings.ReplaceAll(cfg.URL, "{ip}", "1.2.3.4")); err != nil {
+			return nil, err
 		}
 		if _, err := url.Parse(strings.ReplaceAll(cfg.URL, "{ip}", "1.2.3.4")); err != nil {
 			return nil, fmt.Errorf("bad url: %w", err)
@@ -552,6 +560,9 @@ func (p *httpProvider) Lookup(ip string) (*Info, error) {
 	target = strings.ReplaceAll(target, "{ip}", url.QueryEscape(ip))
 	ctx, cancel := context.WithTimeout(context.Background(), p.timeout)
 	defer cancel()
+	if err := safeurl.ValidateURL(target); err != nil {
+		return nil, err
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	if err != nil {
 		return nil, err

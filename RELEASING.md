@@ -37,7 +37,7 @@ is designed so a release is a repeatable 15-minute operation.
    ```
 5. **Verify the published artifacts**
    - Download one archive, extract it into an empty directory, run `./echo-server`, check
-     `http://HOST:8080/ui/` and `GET /api/system` (`version` = tag, `build_commit` = tagged commit).
+     `http://HOST:23231/ui/` and `GET /api/system` (`version` = tag, `build_commit` = tagged commit).
    - `sha256sum -c checksums.txt` inside the release download directory.
    - **Lite release**: download `echo-server-lite_*`, run it with `ECHO_SERVER_LITE=1`, confirm
      `/ip` answers, `/ui/` and `/api/config` are 404, and no `echo.db` appears next to the binary.

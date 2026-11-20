@@ -79,8 +79,8 @@ release:
 
     ```bash
     ECHO_SERVER_LITE=1 ./echo-server-lite
-    curl -k https://HOST:8443/ip          # {"ip":"..."}
-    curl -k http://HOST:8080/ip?format=text
+    curl -k https://HOST:23232/ip          # {"ip":"..."}
+    curl -k http://HOST:23231/ip?format=text
     ```
 
     完整产品（含控制台）请下载主 release 的 `echo-server_*` 产物。

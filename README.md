@@ -39,18 +39,18 @@ Steps:
    Verify it against checksums.txt, then extract.
 2. Start it:  ECHO_SERVER_DB=./echo.db ECHO_SERVER_ADMIN_USERNAME=admin \
               ECHO_SERVER_ADMIN_PASSWORD='<healthy-random-password>' \
-              PORT=8443 HTTP_PORT=8080 ./echo-server
+              PORT=23232 HTTP_PORT=23231 ./echo-server
    Run it under nohup/systemd and confirm the process stays up for 10 seconds.
 3. Acceptance tests — all must pass before you report success:
-   - curl -sf http://127.0.0.1:8080/health            -> {"status":"ok"}
-   - curl -sf http://127.0.0.1:8080/ip                -> JSON containing "ip"
-   - curl -sf http://127.0.0.1:8080/ip?format=text    -> a bare IP address
-   - curl -sf -k https://127.0.0.1:8443/echo | head   -> JSON with "headers" and "client_hello"
-   - curl -sf -k -H 'User-Agent: curl/8.5.0' https://127.0.0.1:8443/echo?fields=client
+   - curl -sf http://127.0.0.1:23231/health            -> {"status":"ok"}
+   - curl -sf http://127.0.0.1:23231/ip                -> JSON containing "ip"
+   - curl -sf http://127.0.0.1:23231/ip?format=text    -> a bare IP address
+   - curl -sf -k https://127.0.0.1:23232/echo | head   -> JSON with "headers" and "client_hello"
+   - curl -sf -k -H 'User-Agent: curl/8.5.0' https://127.0.0.1:23232/echo?fields=client
                                                       -> "client.name" == "curl" (or curl-like)
-   - curl -sf http://127.0.0.1:8080/ui/ | grep 'id="root"'   -> the console page loads
+   - curl -sf http://127.0.0.1:23231/ui/ | grep 'id="root"'   -> the console page loads
    - POST /api/login with the admin credentials returns a JWT.
-4. Print the console URL (http://<lan-ip>:8080/ui/) and the admin username.
+4. Print the console URL (http://<lan-ip>:23231/ui/) and the admin username.
 Report: what you ran, every test output, and the URL. If any check fails, fix it before reporting.
 ```
 
@@ -63,13 +63,13 @@ Steps:
 1. Download the lite release: plain semver tags (`1.x.y`, no `v` prefix), artifact
    echo-server-lite_<version>_<os>_<arch>.tar.gz, verify checksums, extract.
 2. Start with no database at all:
-     ECHO_SERVER_LITE=1 PORT=8443 HTTP_PORT=8080 ./echo-server-lite
+     ECHO_SERVER_LITE=1 PORT=23232 HTTP_PORT=23231 ./echo-server-lite
 3. Acceptance tests — all must pass:
-   - curl -sf http://127.0.0.1:8080/ip                -> JSON containing "ip"
-   - curl -sf http://127.0.0.1:8080/ip?format=text    -> a bare IP
-   - curl -sf http://127.0.0.1:8080/echo?fields=ip.ip -> JSON with ip
-   - curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/ui/      -> 404
-   - curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/api/config -> 404
+   - curl -sf http://127.0.0.1:23231/ip                -> JSON containing "ip"
+   - curl -sf http://127.0.0.1:23231/ip?format=text    -> a bare IP
+   - curl -sf http://127.0.0.1:23231/echo?fields=ip.ip -> JSON with ip
+   - curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:23231/ui/      -> 404
+   - curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:23231/api/config -> 404
    - No *.db / *.db-wal file appears in the working directory.
    - 1000 sequential requests all return 200 (loop with curl -sf).
 4. Raise file-descriptor limits (ulimit -n 1048576) and note it in the report —
@@ -85,7 +85,7 @@ of trusting the README table.
 ```text
 Verify that the echo-server lite build really holds 100,000 concurrent connections on this machine.
 
-1. Start it:  ECHO_SERVER_LITE=1 PORT=8443 HTTP_PORT=8080 ./echo-server &
+1. Start it:  ECHO_SERVER_LITE=1 PORT=23232 HTTP_PORT=23231 ./echo-server &
    (or `go run .` from a checkout).
 2. Apply the kernel limits the test needs:
      sudo sysctl -w net.core.somaxconn=65535 net.ipv4.tcp_max_syn_backlog=65535
@@ -95,12 +95,12 @@ Verify that the echo-server lite build really holds 100,000 concurrent connectio
    outgoing ports, which is a CLIENT limit):
      for ip in 127.0.0.2 127.0.0.3 127.0.0.4 127.0.0.5; do sudo ip addr add $ip/8 dev lo; done
 4. Hold connections:
-     go run ./tools/loadtest -mode hold -c 100000 -addr 127.0.0.1:8080 \
+     go run ./tools/loadtest -mode hold -c 100000 -addr 127.0.0.1:23231 \
        -la 127.0.0.1,127.0.0.2,127.0.0.3,127.0.0.4,127.0.0.5 -d 20s
    Acceptance: dialed==100000, failed==0. While it runs, read the server's RSS (ps -o rss).
    Expect roughly 7-8 KB per connection.
 5. Drive requests over the same 100k connections:
-     go run ./tools/loadtest -mode drive -c 100000 -path /ip -addr 127.0.0.1:8080 \
+     go run ./tools/loadtest -mode drive -c 100000 -path /ip -addr 127.0.0.1:23231 \
        -la 127.0.0.1,127.0.0.2,127.0.0.3,127.0.0.4,127.0.0.5 -d 12s
    Acceptance: dialed==100000, failed==0, errs==0, and rps > 100000.
 6. Clean up: remove the extra loopback addresses (`sudo ip addr del ...`) and stop the server.
@@ -122,9 +122,9 @@ Work on the echo-server repository (Go + React, single binary).
      go test ./... -race -count=1
 4. Make your change, re-run the full gate, and add a test that fails without the change.
 5. Verify the running binary, not just the unit tests:
-     PORT=18443 HTTP_PORT=18080 ./echo-server &
-     curl -sf http://127.0.0.1:18080/ip
-     curl -sf -k https://127.0.0.1:18443/echo?fields=ja4,tls,client
+     PORT=@@KEEP_123232@@ HTTP_PORT=@@KEEP_123231@@ ./echo-server &
+     curl -sf http://127.0.0.1:@@KEEP_123231@@/ip
+     curl -sf -k https://127.0.0.1:@@KEEP_123232@@/echo?fields=ja4,tls,client
 Report: the diff summary, the gate output, and the manual curl output.
 ```
 
@@ -133,7 +133,7 @@ Report: the diff summary, the gate output, and the manual curl output.
 ```text
 Start the echo-server and probe it from several clients to see the fingerprint surface.
 
-1. Build and run: make build && PORT=8443 HTTP_PORT=8080 ./echo-server &
+1. Build and run: make build && PORT=23232 HTTP_PORT=23231 ./echo-server &
 2. For each of these clients, capture the response from /echo?fields=client,ja4,tls,http2,ip and
    summarise name, family, JA4, HTTP/2 fingerprint and detected UA spoofing:
      curl, wget, python -c 'import requests; requests.get(...)', node, go net/http,
@@ -147,7 +147,7 @@ Start the echo-server and probe it from several clients to see the fingerprint s
 
 ```bash
 make build                       # builds frontend/dist, then embeds it into ./echo-server
-PORT=8443 ./echo-server          # HTTPS (TLS fingerprints) + plain HTTP console on :8080
+PORT=23232 ./echo-server          # HTTPS (TLS fingerprints) + plain HTTP console on :23231
 ```
 
 `make build` runs `npm ci && npm run build` in `frontend/` first and then `go build`. The console is
@@ -155,17 +155,17 @@ embedded with `//go:embed frontend/dist`, so `./echo-server` is the **only file 
 directory, no Node runtime, no reverse proxy required. Building the frontend by hand? Run
 `cd frontend && npm ci && npm run build` before `go build`, otherwise the binary embeds a stale UI.
 
-The admin console is served over **plain HTTP on port 8080** by default, so opening
-`http://HOST:8080/ui/` needs no self-signed-certificate exception. The HTTPS listener on `PORT` (default
-8443) serves the same UI/APIs **and** captures the TLS ClientHello/JA3/JA4 that plain HTTP cannot provide.
-Set `HTTP_PORT=8080` to move the plain listener, or `HTTP_PORT=0` to disable it and stay HTTPS-only.
+The admin console is served over **plain HTTP on port 23231** by default, so opening
+`http://HOST:23231/ui/` needs no self-signed-certificate exception. The HTTPS listener on `PORT` (default
+23232) serves the same UI/APIs **and** captures the TLS ClientHello/JA3/JA4 that plain HTTP cannot provide.
+Set `HTTP_PORT=23231` to move the plain listener, or `HTTP_PORT=0` to disable it and stay HTTPS-only.
 
 ### Run with Docker
 
 ```bash
 docker build -t echo-server .
 docker run -d --name echo-server \
-  -p 8080:8080 -p 8443:8443 \
+  -p 23231:23231 -p 23232:23232 \
   -v echo-data:/data \
   -e ECHO_SERVER_ADMIN_USERNAME=admin \
   -e ECHO_SERVER_ADMIN_PASSWORD='change-me-please' \
@@ -205,14 +205,14 @@ sudo sysctl -w net.ipv4.ip_local_port_range="1024 65535"   # client side only
 ulimit -n 1048576
 
 # 1) start the lite server
-ECHO_SERVER_LITE=1 PORT=8443 HTTP_PORT=8080 ./echo-server &
+ECHO_SERVER_LITE=1 PORT=23232 HTTP_PORT=23231 ./echo-server &
 
 # 2) hold 100k connections open (memory per connection)
-go run ./tools/loadtest -mode hold -c 100000 -addr 127.0.0.1:8080 \
+go run ./tools/loadtest -mode hold -c 100000 -addr 127.0.0.1:23231 \
   -la 127.0.0.1,127.0.0.2,127.0.0.3,127.0.0.4,127.0.0.5 -d 20s
 
 # 3) drive requests over 100k connections (throughput)
-go run ./tools/loadtest -mode drive -c 100000 -path /ip -addr 127.0.0.1:8080 \
+go run ./tools/loadtest -mode drive -c 100000 -path /ip -addr 127.0.0.1:23231 \
   -la 127.0.0.1,127.0.0.2,127.0.0.3,127.0.0.4,127.0.0.5 -d 12s
 ```
 
@@ -227,9 +227,9 @@ parsing, JA3/JA4/JA4H/h2 fingerprints, client identification, geolocation, query
 answers exactly that and nothing else:
 
 ```bash
-curl -k https://HOST:8443/ip                   # {"ip":"203.0.113.42"}
-curl -k https://HOST:8443/ip?format=text       # 203.0.113.42
-curl -k http://HOST:8080/ip                    # plain HTTP listener, no TLS at all
+curl -k https://HOST:23232/ip                   # {"ip":"203.0.113.42"}
+curl -k https://HOST:23232/ip?format=text       # 203.0.113.42
+curl -k http://HOST:23231/ip                    # plain HTTP listener, no TLS at all
 ```
 
 It honours `X-Forwarded-For` / `X-Real-IP` / `CF-Connecting-IP` the same way `/echo` does, returns
@@ -259,11 +259,11 @@ All knobs are optional. Resolution order: **query param > header > admin default
 
 ```bash
 # everything (default)
-curl -k https://HOST:8443/echo
+curl -k https://HOST:23232/echo
 
 # only what you need, as text — smallest response
 curl -k -H 'X-Forwarded-For: 8.8.8.8' \
-  'https://HOST:8443/echo?format=text&fields=ip.country,ip.city,ip.latitude,ip.longitude,ip.connection_type'
+  'https://HOST:23232/echo?format=text&fields=ip.country,ip.city,ip.latitude,ip.longitude,ip.connection_type'
 # ip.city=San Jose
 # ip.connection_type=datacenter
 # ip.country=United States
@@ -271,10 +271,10 @@ curl -k -H 'X-Forwarded-For: 8.8.8.8' \
 # ip.longitude=-121.8949553
 
 # same fields as JSON
-curl -k 'https://HOST:8443/echo?format=json&fields=client_hello.sni,client_hello.ja3_hash,ip.asn,ip.org'
+curl -k 'https://HOST:23232/echo?format=json&fields=client_hello.sni,client_hello.ja3_hash,ip.asn,ip.org'
 
 # just the client verdict (who is calling, and whether its UA is honest)
-curl -k 'https://HOST:8443/echo?fields=client.name,client.family,client.spoofed,client.confidence'
+curl -k 'https://HOST:23232/echo?fields=client.name,client.family,client.spoofed,client.confidence'
 # {"client":{"confidence":0.88,"family":"cli","name":"curl","spoofed":true}}
 ```
 
@@ -360,7 +360,7 @@ TLS handshake the request is flagged `spoofed: true`, the **TLS result is report
 spells out both sides:
 
 ```bash
-curl -k -A 'Mozilla/5.0 … Chrome/131.0.0.0 Safari/537.36' https://HOST:8443/echo?fields=client
+curl -k -A 'Mozilla/5.0 … Chrome/131.0.0.0 Safari/537.36' https://HOST:23232/echo?fields=client
 # {"client":{"name":"curl","family":"cli","spoofed":true,"confidence":0.88,
 #   "notes":["TLS fingerprint says curl (cli) but the User-Agent claims Chrome (browser) — the UA is very likely spoofed"]}}
 ```
@@ -400,30 +400,30 @@ card drives the same API: pick a dataset, add/edit/sync/delete its providers.
 
 ```bash
 # list every dataset with its providers and live status (entries, observations, last sync, errors)
-curl -k -H "Authorization: Bearer $JWT" https://HOST:8443/api/datasets
+curl -k -H "Authorization: Bearer $JWT" https://HOST:23232/api/datasets
 # …or just one dataset (returns the object, not an array)
-curl -k -H "Authorization: Bearer $JWT" 'https://HOST:8443/api/datasets?dataset=ja4'
+curl -k -H "Authorization: Bearer $JWT" 'https://HOST:23232/api/datasets?dataset=ja4'
 
 # add a local library or directory to the JA4 dataset (watch it for changes every 5 minutes)
 curl -k -X POST -H "Authorization: Bearer $JWT" -H 'Content-Type: application/json' \
   -d '{"name":"my-fp","kind":"file","priority":10,"path":"/data/my-ja4db.json","refresh_min":5}' \
-  'https://HOST:8443/api/datasets?dataset=ja4'
+  'https://HOST:23232/api/datasets?dataset=ja4'
 
 # pull a private cloud library every 30 minutes, authenticating with a header
 curl -k -X POST -H "Authorization: Bearer $JWT" -H 'Content-Type: application/json' \
   -d '{"name":"cloud","kind":"remote","priority":20,"url":"https://cloud.example.com/ja4db.json",
        "headers":{"Authorization":"Bearer CLOUD_TOKEN"},"refresh_min":30}' \
-  'https://HOST:8443/api/datasets?dataset=ja4'
+  'https://HOST:23232/api/datasets?dataset=ja4'
 
 # generate a datacenter CIDR table with any script (stdout is the data)
 curl -k -X POST -H "Authorization: Bearer $JWT" -H 'Content-Type: application/json' \
   -d '{"name":"nightly","kind":"command","priority":10,"command":"/opt/gen-cidrs.sh","refresh_min":720}' \
-  'https://HOST:8443/api/datasets?dataset=datacenter_cidr'
+  'https://HOST:23232/api/datasets?dataset=datacenter_cidr'
 
 # force a sync now (all providers of a dataset, or ?provider=NAME — a file provider is re-read);
 # DELETE removes a custom provider
-curl -k -X POST -H "Authorization: Bearer $JWT" 'https://HOST:8443/api/datasets/sync?dataset=ja4&provider=my-fp'
-curl -k -X DELETE -H "Authorization: Bearer $JWT" 'https://HOST:8443/api/datasets?dataset=ja4&provider=cloud'
+curl -k -X POST -H "Authorization: Bearer $JWT" 'https://HOST:23232/api/datasets/sync?dataset=ja4&provider=my-fp'
+curl -k -X DELETE -H "Authorization: Bearer $JWT" 'https://HOST:23232/api/datasets?dataset=ja4&provider=cloud'
 ```
 
 The JA4 cloud contract is the same `{meta, ja4}` JSON that `tools/ja4dbgen` writes —
@@ -454,7 +454,7 @@ last success) are exposed through the API/UI, so a silently degrading upstream i
 
 ```bash
 # list the chain: config (credentials masked), ordering and live stats
-curl -k -H "Authorization: Bearer $JWT" https://HOST:8443/api/ipproviders
+curl -k -H "Authorization: Bearer $JWT" https://HOST:23232/api/ipproviders
 
 # append a paid cloud API; it is tried before the built-ins when its priority is higher
 curl -k -X POST -H "Authorization: Bearer $JWT" -H 'Content-Type: application/json' \
@@ -463,20 +463,20 @@ curl -k -X POST -H "Authorization: Bearer $JWT" -H 'Content-Type: application/js
        "headers":{"Authorization":"Bearer CLOUD_TOKEN"},
        "mapping":{"country":"data.country","city":"data.city","asn":"data.asn",
                   "is_proxy":"data.privacy.proxy","is_hosting":"data.privacy.hosting"}}' \
-  https://HOST:8443/api/ipproviders
+  https://HOST:23232/api/ipproviders
 
 # try a local script (any language) as another link in the chain
 curl -k -X POST -H "Authorization: Bearer $JWT" -H 'Content-Type: application/json' \
   -d '{"name":"local","kind":"command","enabled":true,"priority":-10,
        "command":"/opt/ipintel.sh {ip}","timeout_sec":3}' \
-  https://HOST:8443/api/ipproviders
+  https://HOST:23232/api/ipproviders
 
 # query one IP through the chain without touching the result cache
 curl -k -X POST -H "Authorization: Bearer $JWT" -H 'Content-Type: application/json' \
-  -d '{"ip":"8.8.8.8"}' https://HOST:8443/api/ipproviders/test
+  -d '{"ip":"8.8.8.8"}' https://HOST:23232/api/ipproviders/test
 
 # remove a custom provider (built-ins can be disabled but not deleted)
-curl -k -X DELETE -H "Authorization: Bearer $JWT" 'https://HOST:8443/api/ipproviders?name=cloud'
+curl -k -X DELETE -H "Authorization: Bearer $JWT" 'https://HOST:23232/api/ipproviders?name=cloud'
 ```
 
 The chain is persisted in SQLite under `ip_lookup_providers` and can be seeded with the `IP_LOOKUP_PROVIDERS`
@@ -580,6 +580,61 @@ The fusion shows up in the output: malware-only fingerprints (`t13d201100_…` �
 - **JA4** — per the FoxIO spec: `t` + TLS version (2 chars) + SNI flag (`d`/`i`) + 2-digit cipher count + 2-digit extension count + ALPN first/last char, then `_<12-hex of sorted non-GREASE ciphers>_<12-hex of sorted non-GREASE extensions minus SNI/ALPN + "_" + signature algorithms>`.
 - **JA4_r / JA4_o** — the same layout with raw (unhashed) values: sorted (`_r`) and original wire order (`_o`).
 
+## Agent integration (MCP)
+
+Every capability here is exposed to agents through a built-in **MCP server**: the same binary, run as
+`echo-server mcp`, speaks JSON-RPC 2.0 over stdio — the transport Claude Code, Codex and other MCP
+clients use. It is a *client* of the running deployment, so auth, audit, rate limits and the query log
+all apply unchanged.
+
+```bash
+# register once, then the agent can call the tools below
+claude mcp add echo-server \
+  --env ECHO_SERVER_URL=http://127.0.0.1:23231 \
+  --env ECHO_SERVER_API_KEY=esk_... \
+  -- /path/to/echo-server mcp
+```
+
+| Tool | What an agent can do with it |
+|---|---|
+| `echo_server_health` | confirm the deployment is up |
+| `echo_server_my_ip` | learn its own egress IP (fast `/ip` path) |
+| `echo_server_self_fingerprint` | see how the server identifies it — client name/family, JA3/JA4, h2 fingerprint, UA spoofing; pass `user_agent` to test impersonation |
+| `echo_server_lookup_ip` | geo/ASN/connection type for up to 100 addresses |
+| `echo_server_search_ja4` | search the fingerprint library (incl. malware families) |
+| `echo_server_query_log` | audit traffic by client/family/spoofed/country |
+| `echo_server_stats` | traffic shape: top clients, spoof counts, unidentified clients |
+| `echo_server_providers` | which geo provider is degrading |
+| `echo_server_issue_password_reset` | admin only: one-time reset token |
+
+Tools that need TLS fingerprints (self_fingerprint, spoof detection) go over HTTPS by default; the MCP client falls back to the plain port only if the TLS listener is unreachable. Plain HTTP cannot report JA3/JA4 or a spoof verdict.
+
+A Claude Code **skill** for this service lives in [`skills/echo-server/SKILL.md`](skills/echo-server/SKILL.md)
+when to use each tool, how to interpret `spoofed`/`connection_type`/`anycast`, and the common tasks.
+
+### Who may call the agent tools
+
+`agent_access` (访问控制 → Agent 访问策略) decides the credential an agent needs for MCP tools and
+`/ip`, independent of the `require_token` switch that governs `/echo`:
+
+| Value | Who can call |
+|---|---|
+| `public` | anyone who can reach the port — right for a scratch internal endpoint |
+| `token` (default) | any JWT or API key; mutating tools still need an admin credential |
+| `admin_token` | admin-scoped key or admin JWT only — use when every lookup must be attributable |
+
+The default denies anonymous `/ip`; previously this endpoint bypassed `require_token` entirely. Refusals
+return 401/403 with a `WWW-Authenticate` header and a JSON body naming the policy and where to change it,
+so an agent can recover instead of guessing. `echo-server mcp` also states the credential situation in
+the `initialize` handshake, and refuses admin-only tools with a readable message.
+
+### Security notes
+
+- Outbound URLs (IP providers, remote datasets) are refused when they point at loopback, RFC 1918,
+  link-local or cloud-metadata addresses — checked when the provider is saved and again on every dial.
+- `file` data sources may only read inside `ECHO_SERVER_DATA_DIR` (default: the dataset cache directory).
+- Login timing is equalised so response time does not reveal whether an account exists.
+
 ## Admin UI & API
 
 `/ui/` — React + Ant Design console backed by a SQLite user system. **A fresh installation has no accounts
@@ -596,6 +651,37 @@ access immediately (every request re-reads the account), and the last enabled ad
 or demoted. Admins control *允许访客自助注册* in the user-management card (off by default). While it is off, only
 admins can create accounts; while it is on, the login page offers signup and every self-registered account is a
 viewer.
+
+### Recovering a forgotten password
+
+Password hashes are one-way, so a forgotten password can only be **replaced**, never read back. There are two
+paths, for the two situations operators actually hit:
+
+**1. Online, self-service (someone is still logged in as admin).** In *用户管理*, the key icon next to an
+account issues a **one-time reset token**:
+
+- 32 bytes of entropy, shown exactly once (the server stores only its SHA-256 — a stolen database cannot
+  mint a working token),
+- valid for 30 minutes, single use; issuing a new one invalidates the previous token for that account,
+- the user opens `/ui/`, clicks **忘记密码？**, pastes the token and a new password; they are logged in
+  immediately afterward,
+- no email is required (this product has no SMTP dependency); deliver the token over whatever private
+  channel you already share,
+- issuance and redemption are both written to the audit trail, and redemption is rate-limited per peer.
+
+**2. Offline, last resort (nobody can log in, e.g. the only admin forgot).** Stop the server and run the
+binary in reset mode against the database — this needs local access to the DB file, which is exactly the
+trust boundary you want for this operation:
+
+```bash
+./echo-server -reset-password -user root -password 'new-strong-password'
+# or omit -password to be prompted without echoing:
+./echo-server -reset-password -user root
+```
+
+It re-enables the account if it was disabled, optionally sets `-role`, never prints the password back, and
+records `password.reset.offline` in the audit log with the invoking OS user. Point it at the right database
+with `ECHO_SERVER_DB` if you run a non-default path.
 
 The console is a single-page app with a grouped, collapsible sidebar and a `Ctrl/⌘+K` page palette. Each
 section is its own route (`/ui/users`, `/ui/logs`, …), so links and refreshes work; the server falls back to
@@ -715,22 +801,22 @@ When *require API token* is on, echo requests need `X-API-Token: <token>` (or `?
 
 ```bash
 # fresh install: create the first admin from the command line (or use /ui/)
-JWT=$(curl -sk -X POST https://HOST:8443/api/setup -H 'Content-Type: application/json' \
+JWT=$(curl -sk -X POST https://HOST:23232/api/setup -H 'Content-Type: application/json' \
   -d '{"username":"owner","password":"a-long-password"}' | jq -r .token)
 
 # ...or on an existing install: log in and keep the token
-JWT=$(curl -sk -X POST https://HOST:8443/api/login -H 'Content-Type: application/json' \
+JWT=$(curl -sk -X POST https://HOST:23232/api/login -H 'Content-Type: application/json' \
   -d '{"username":"owner","password":"a-long-password"}' | jq -r .token)
 
 # create a read-only account, then rotate your own password
 curl -k -X POST -H "Authorization: Bearer $JWT" -H 'Content-Type: application/json' \
-  -d '{"username":"alice","password":"alice-pass","role":"viewer"}' https://HOST:8443/api/users
+  -d '{"username":"alice","password":"alice-pass","role":"viewer"}' https://HOST:23232/api/users
 curl -k -X POST -H "Authorization: Bearer $JWT" -H 'Content-Type: application/json' \
-  -d '{"old_password":"a-long-password","new_password":"a-longer-pass"}' https://HOST:8443/api/me/password
+  -d '{"old_password":"a-long-password","new_password":"a-longer-pass"}' https://HOST:23232/api/me/password
 
 # disable an account (its existing tokens stop working immediately)
 curl -k -X POST -H "Authorization: Bearer $JWT" -H 'Content-Type: application/json' \
-  -d '{"username":"alice","disabled":true}' https://HOST:8443/api/users
+  -d '{"username":"alice","disabled":true}' https://HOST:23232/api/users
 ```
 
 ## IP intelligence
@@ -741,15 +827,15 @@ triaging addresses in logs, abuse reports, or batch enrichment.
 
 ```bash
 # one address (the single result is the bare IP object)
-curl -k -H "Authorization: Bearer $JWT" 'https://HOST:8443/api/ip/lookup?ip=8.8.8.8'
+curl -k -H "Authorization: Bearer $JWT" 'https://HOST:23232/api/ip/lookup?ip=8.8.8.8'
 
 # batch of up to 100 (results keep input order); nocache=1 bypasses the result cache
 curl -k -H "Authorization: Bearer $JWT" -H 'Content-Type: application/json' \
-  -d '{"ips":["8.8.8.8","1.1.1.1","104.131.0.1"],"nocache":false}' https://HOST:8443/api/ip/lookup
+  -d '{"ips":["8.8.8.8","1.1.1.1","104.131.0.1"],"nocache":false}' https://HOST:23232/api/ip/lookup
 
 # plain-text batch (one address per line, or comma separated)
 printf '8.8.8.8\n1.1.1.1\n' | curl -k -X POST -H "Authorization: Bearer $JWT" \
-  --data-binary @- https://HOST:8443/api/ip/lookup/bulk
+  --data-binary @- https://HOST:23232/api/ip/lookup/bulk
 ```
 
 - Offline by default-capable: ~14.8k embedded datacenter prefixes (AWS/GCP/DigitalOcean/Oracle official lists, Akamai's announced prefixes + major hosting brands) and a 100-entry residential-proxy sample — no network needed.
