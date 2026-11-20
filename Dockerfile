@@ -29,7 +29,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath \
       -X main.buildDate=${BUILD_DATE}" \
     -o /out/echo-server .
 
-FROM alpine:3.20
+FROM alpine:3.24
 RUN apk add --no-cache ca-certificates tzdata \
  && addgroup -g 10001 echo \
  && adduser -D -u 10001 -G echo echo \
