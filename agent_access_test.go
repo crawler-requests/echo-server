@@ -16,12 +16,37 @@ func setAgentPolicy(t *testing.T, v string) {
 	t.Cleanup(func() { _ = SetConfig("agent_access", prev) })
 }
 
-// The default is "token": an unset policy must not silently expose /ip to the
-// internet. This is the bug the policy exists to close.
-func TestAgentAccess_DefaultsToToken(t *testing.T) {
+// Default is public: /ip is a self-only endpoint, and gating it by default
+// breaks uptime checks. require_token is what locks it down, exercised below.
+func TestAgentAccess_DefaultsToPublic(t *testing.T) {
 	initDB()
-	if got := agentAccess(); got != agentToken {
-		t.Fatalf("default policy = %q, want %q", got, agentToken)
+	_ = SetConfig("agent_access", "")
+	_ = SetConfig("require_token", "false")
+	t.Cleanup(func() { _ = SetConfig("agent_access", "") })
+	if got := agentAccess(); got != agentPublic {
+		t.Fatalf("default policy = %q, want %q", got, agentPublic)
+	}
+}
+
+// require_token must extend to /ip; otherwise turning auth on leaves a public
+// hole on the agent surface.
+func TestAgentAccess_RequireTokenLocksIP(t *testing.T) {
+	initDB()
+	initExtraDB()
+	_ = SetConfig("agent_access", "")
+	_ = SetConfig("require_token", "true")
+	t.Cleanup(func() {
+		_ = SetConfig("agent_access", "")
+		_ = SetConfig("require_token", "false")
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/ip", nil)
+	rec := httptest.NewRecorder()
+	if agentAuthorized(rec, req) {
+		t.Fatal("require_token=true left /ip public")
+	}
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rec.Code)
 	}
 }
 

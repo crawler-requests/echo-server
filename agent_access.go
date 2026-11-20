@@ -29,26 +29,33 @@ const (
 	agentAdminToken = "admin_token"
 )
 
-// agentAccess is the effective policy (defaults to token).
+// agentAccess is the effective policy.
+//
+// The default is public: /ip is a stateless "what is my own egress IP"
+// endpoint that reveals nothing about anyone else, and turning it into a
+// credential-only endpoint by default silently breaks the most common use
+// (uptime checks, proxy-pool health probes). An operator who wants it locked
+// down — or who wants MCP-style read access gated — sets agent_access
+// explicitly, or turns on require_token, which /ip also honours.
 func agentAccess() string {
 	switch v := strings.ToLower(strings.TrimSpace(GetConfig("agent_access"))); v {
 	case agentPublic, agentToken, agentAdminToken:
 		return v
 	}
-	// Lite mode has no database and no accounts, so there is no credential to
-	// check: refuse to silently allow everything, and refuse to break a fresh
-	// install that has not configured a policy yet. Public is the only
-	// meaningful answer there.
-	if liteMode {
-		return agentPublic
-	}
-	return agentToken
+	return agentPublic
 }
 
 // agentAuthorized reports whether the request carries enough credential for the
 // current policy, and writes the refusal when it does not.
 func agentAuthorized(w http.ResponseWriter, r *http.Request) bool {
-	switch agentAccess() {
+	policy := agentAccess()
+	// /ip and the MCP read path also obey the existing require_token switch:
+	// an operator who already locked the echo surface down does not expect the
+	// agent surface to be a public bypass.
+	if policy == agentPublic && GetConfig("require_token") == "true" {
+		policy = agentToken
+	}
+	switch policy {
 	case agentPublic:
 		return true
 	case agentAdminToken:
