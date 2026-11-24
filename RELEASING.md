@@ -41,6 +41,18 @@ is designed so a release is a repeatable 15-minute operation.
    - `sha256sum -c checksums.txt` inside the release download directory.
    - **Lite release**: download `echo-server-lite_*`, run it with `ECHO_SERVER_LITE=1`, confirm
      `/ip` answers, `/ui/` and `/api/config` are 404, and no `echo.db` appears next to the binary.
+   - **Container image** — the `image` job pushes to GHCR with the tag as `v1.2.3`, `1.2`, `1` and
+     `latest`:
+     ```bash
+     docker pull ghcr.io/crawler-requests/echo-server:v1.0.0
+     docker run -d -p 23231:23231 -e ECHO_SERVER_ADMIN_PASSWORD=x \
+       ghcr.io/crawler-requests/echo-server:v1.0.0
+     curl -sf http://127.0.0.1:23231/health
+     docker image inspect ghcr.io/crawler-requests/echo-server:v1.0.0 --format '{{.Architecture}}'
+     ```
+     The package must be **public** for anonymous pulls: GHCR inherits the repository's visibility on
+     first publish, but if the pull above fails with `unauthorized`, open
+     *Org → Packages → echo-server → Settings* and set visibility to *Public* once.
 6. **Post-release**
    - Announce in the project README/discussions if applicable.
    - Bump `serverVersion`'s development default only if the project starts cutting maintenance
