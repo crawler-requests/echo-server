@@ -6,6 +6,30 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.0.3] - 2026-11-24
+
+### Added
+
+- **Releases publish a container image to GHCR, so deploying is a pull.** `release.yml` now has an
+  `image` job that builds `linux/amd64` and `linux/arm64` with Buildx and pushes
+  `ghcr.io/crawler-requests/echo-server` under `v1.2.3`, `1.2`, `1` and `latest`. GHCR is free for
+  public repositories and the job authenticates with the default `GITHUB_TOKEN` (`packages: write`),
+  so no extra secret is needed. README (both languages) and the site now show
+  `docker run … ghcr.io/crawler-requests/echo-server:latest` instead of a local `docker build`, and
+  document that the container runs as UID 10001 — a named volume gets the right ownership, a
+  bind-mounted host directory must be `chown 10001:10001` first (verified: binding a root-owned
+  directory made the container exit with `unable to open database file`).
+
+### Fixed
+
+- **The site's hero sample is a real response.** It advertised `"spoofed": false`, but `spoofed` is
+  `omitempty` and is only emitted when the UA and TLS disagree — so a honest curl never shows it. The
+  sample now shows `source` and `matches`, which the server really returns (checked against a live
+  `/echo`), and its `curl` line uses `-sk`, because a fresh install serves a self-signed certificate.
+  Every other figure on the site was re-checked against a running instance: the `AS15169` /
+  `datacenter` pairing reproduces for `8.8.8.8`, `ja4_r`/`ja4_o` are emitted as documented, and the
+  throughput table matches `tools/loadtest`.
+
 ## [0.0.1] - 2026-11-20
 
 ### Added
@@ -179,6 +203,7 @@ First public release. One self-contained Go binary with the React console embedd
 - **Build & release** — `Makefile`, `//go:embed` single binary, GoReleaser (6 platform targets,
   archives, checksums), GitHub Actions CI and tag-triggered releases, Dockerfile.
 
-[Unreleased]: https://github.com/crawler-requests/echo-server/compare/v0.0.1...HEAD
+[Unreleased]: https://github.com/crawler-requests/echo-server/compare/v1.0.3...HEAD
+[1.0.3]: https://github.com/crawler-requests/echo-server/releases/tag/v1.0.3
 [0.0.1]: https://github.com/crawler-requests/echo-server/releases/tag/v0.0.1
 [1.0.0]: https://github.com/crawler-requests/echo-server/releases/tag/v1.0.0
