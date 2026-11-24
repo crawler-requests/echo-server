@@ -1,0 +1,433 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>echo-server — TLS / HTTP2 指纹回显服务（单文件 Go 二进制）</title>
+<meta name="description" content="自托管的 HTTPS 回声服务：回显完整 TLS ClientHello 与 HTTP/2 指纹（JA3/JA4/JA4H），识别调用方客户端与 UA 伪造，附带 ASN/地理与连接类型判定。单个 Go 二进制，自带 React 控制台与 SQLite。">
+<meta name="theme-color" content="#0f172a">
+<meta property="og:type" content="website">
+<meta property="og:title" content="echo-server — TLS / HTTP2 指纹回显服务">
+<meta property="og:description" content="回显完整 TLS ClientHello 与 HTTP/2 指纹，识别客户端与 UA 伪造，并给出 IP 地理/ASN/连接类型。单文件部署。">
+<meta property="og:url" content="https://crawler-requests.github.io/echo-server/">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%235b5bd6'/%3E%3Cpath d='M9 11h14M9 16h14M9 21h9' stroke='white' stroke-width='2.4' stroke-linecap='round'/%3E%3C/svg%3E">
+<style>
+:root{
+  --brand:#5b5bd6; --brand-2:#7c5cf5; --brand-soft:#eef2ff;
+  --ink:#0f172a; --muted:#5b6b84; --line:#e6ebf4; --bg:#ffffff; --bg-2:#f7f9fc;
+  --green:#12b76a; --amber:#f79009; --red:#f04438; --sky:#0ba5ec;
+  --radius:18px; --maxw:1080px;
+  --mono:ui-monospace,SFMono-Regular,"JetBrains Mono",Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+img,svg,pre,table{max-width:100%}
+html{scroll-behavior:smooth}
+body{margin:0;color:var(--ink);background:var(--bg);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased}
+a{color:var(--brand);text-decoration:none}
+a:hover{text-decoration:underline}
+h1,h2,h3{line-height:1.25;margin:0}
+.wrap{max-width:var(--maxw);margin:0 auto;padding:0 24px}
+.mono{font-family:var(--mono)}
+
+/* ---------- nav ---------- */
+nav{position:sticky;top:0;z-index:20;backdrop-filter:blur(14px);background:rgba(255,255,255,.82);border-bottom:1px solid var(--line)}
+nav .wrap{display:flex;align-items:center;gap:18px;height:62px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:750;letter-spacing:.2px;color:var(--ink)}
+.brand:hover{text-decoration:none}
+.brand svg{width:26px;height:26px}
+.nav-links{margin-left:auto;display:flex;gap:22px;font-size:14px;color:var(--muted)}
+.mobile-links{display:none}
+.nav-links a{color:var(--muted)}
+.nav-links a:hover{color:var(--ink);text-decoration:none}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:9px 16px;border-radius:11px;font-weight:600;font-size:14px;border:1px solid var(--line);background:#fff;color:var(--ink);cursor:pointer;transition:.16s}
+.btn:hover{text-decoration:none;border-color:#cfd8e8;box-shadow:0 2px 10px rgba(15,23,42,.06)}
+.btn.primary{background:var(--brand);border-color:var(--brand);color:#fff}
+.btn.primary:hover{background:#4f46e5;border-color:#4f46e5;box-shadow:0 6px 20px rgba(91,91,214,.28)}
+
+/* ---------- hero ---------- */
+header.hero{position:relative;overflow:hidden;padding:84px 0 72px;background:
+  radial-gradient(900px 420px at 78% -12%,rgba(124,92,245,.20),transparent 62%),
+  radial-gradient(720px 360px at 12% 8%,rgba(11,165,236,.14),transparent 60%),
+  linear-gradient(180deg,#fbfcff,#f6f8fd)}
+.hero-grid{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,.95fr);gap:44px;align-items:center}
+.hero-grid > *{min-width:0}
+.badge{display:inline-flex;align-items:center;gap:8px;padding:5px 12px;border-radius:999px;background:var(--brand-soft);color:var(--brand);font-size:12.5px;font-weight:650;border:1px solid #dfe5ff}
+h1{font-size:clamp(30px,4.2vw,50px);font-weight:800;letter-spacing:-.5px;margin:16px 0 14px}
+h1 .accent{background:linear-gradient(90deg,var(--brand),var(--brand-2));-webkit-background-clip:text;background-clip:text;color:transparent}
+.lead{font-size:17px;color:var(--muted);max-width:620px}
+.cta{display:flex;flex-wrap:wrap;gap:12px;margin-top:26px}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:34px;max-width:640px}
+.stat{padding:14px 16px;border-radius:14px;background:#fff;border:1px solid var(--line)}
+.stat b{display:block;font-size:21px;font-weight:800;letter-spacing:-.3px}
+.stat span{font-size:12.5px;color:var(--muted)}
+
+/* code card */
+.codecard{background:#0d1424;border-radius:16px;padding:16px 18px;box-shadow:0 22px 50px -18px rgba(13,20,36,.5);border:1px solid #1d2a44}
+.codecard .bar{display:flex;gap:6px;margin-bottom:12px}
+.codecard .bar i{width:10px;height:10px;border-radius:50%;background:#2b3a56;display:block}
+.codecard{min-width:0}
+.codecard pre{margin:0;overflow-x:auto;white-space:pre;font-family:var(--mono);font-size:12.8px;line-height:1.75;color:#c9d6ef}
+.codecard.hero-code pre{max-height:420px;overflow-y:auto}
+.codecard pre .c{color:#64789b}
+.codecard pre .k{color:#7dd3fc}
+.codecard pre .s{color:#a7f3c9}
+.codecard pre .n{color:#fcd34d}
+
+/* ---------- sections ---------- */
+section{padding:72px 0}
+section.alt{background:var(--bg-2);border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.eyebrow{font-size:12.5px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--brand)}
+h2{font-size:clamp(24px,3vw,34px);font-weight:800;letter-spacing:-.4px;margin:10px 0 12px}
+.sub{color:var(--muted);max-width:720px;margin-bottom:34px}
+
+.grid{display:grid;gap:16px}
+.grid.g2{grid-template-columns:repeat(2,1fr)}
+.grid.g3{grid-template-columns:repeat(3,1fr)}
+.card{background:#fff;border:1px solid var(--line);border-radius:var(--radius);padding:22px;transition:.18s}
+.card:hover{border-color:#ccd7ea;box-shadow:0 10px 30px -18px rgba(15,23,42,.28);transform:translateY(-2px)}
+.ico{width:38px;height:38px;border-radius:11px;display:grid;place-items:center;margin-bottom:14px;background:var(--brand-soft);color:var(--brand)}
+.ico svg{width:20px;height:20px}
+.card h3{font-size:16.5px;font-weight:750;margin-bottom:6px}
+.card p{color:var(--muted);font-size:14px;margin:0}
+.card .tag{display:inline-block;margin-top:12px;font-size:11.5px;font-family:var(--mono);padding:2px 8px;border-radius:6px;background:#f1f4fa;color:#5b6b84}
+
+/* pipeline */
+.steps{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:0;margin-top:8px;border:1px solid var(--line);border-radius:16px;overflow:hidden;background:#fff}
+.step{padding:22px 18px;border-right:1px solid var(--line);position:relative}
+.step:last-child{border-right:0}
+.step .num{font-family:var(--mono);font-size:12px;color:var(--brand);font-weight:700}
+.step h4{margin:8px 0 6px;font-size:15px}
+.step p{margin:0;color:var(--muted);font-size:13px}
+
+/* table */
+.card p code,.q .a code,section p code{word-break:break-word}
+.table{width:100%;border-collapse:separate;border-spacing:0;background:#fff;border:1px solid var(--line);border-radius:14px;overflow:hidden;font-size:14px}
+.table th,.table td{padding:12px 16px;text-align:left;border-bottom:1px solid var(--line)}
+.table th{background:#f5f8fd;font-size:12.5px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);font-weight:700}
+.table tr:last-child td{border-bottom:0}
+.table td.n{font-family:var(--mono);text-align:right}
+.table-wrap{overflow-x:auto;border-radius:14px}
+.good{color:var(--green);font-weight:700}
+
+/* quickstart */
+.qs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}
+.qs .codecard{box-shadow:0 14px 34px -20px rgba(13,20,36,.45)}
+
+/* faq */
+.faq{display:grid;gap:10px}
+.q{background:#fff;border:1px solid var(--line);border-radius:14px;padding:0}
+.q summary{cursor:pointer;padding:16px 20px;font-weight:650;list-style:none;display:flex;align-items:center;gap:10px}
+.q summary::-webkit-details-marker{display:none}
+.q summary .chev{margin-left:auto;color:var(--muted);transition:.2s}
+.q[open] summary .chev{transform:rotate(90deg)}
+.q .a{padding:0 20px 18px;color:var(--muted);font-size:14.5px}
+.q .a code{font-family:var(--mono);font-size:13px;background:#f1f4fa;padding:1px 6px;border-radius:5px;color:#3f4f68}
+
+/* footer */
+footer{border-top:1px solid var(--line);padding:40px 0 56px;background:#fbfcfe;font-size:13.5px;color:var(--muted)}
+.foot{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between}
+.foot-links{display:flex;gap:20px;flex-wrap:wrap}
+.foot-links a{color:var(--muted)}
+.foot-links a:hover{color:var(--ink)}
+
+@media(max-width:1024px){
+  .hero-grid{grid-template-columns:1fr;gap:28px}
+  .hero-grid .codecard{width:100%;max-width:640px;margin:0 auto}
+  .stats{max-width:none}
+}
+@media(max-width:900px){
+  .stats{grid-template-columns:repeat(3,1fr)}
+  .steps{grid-template-columns:1fr 1fr}
+  .step:nth-child(2){border-right:0}
+  .grid.g3{grid-template-columns:1fr 1fr}
+  .qs{grid-template-columns:1fr}
+}
+@media(max-width:600px){
+  .nav-links{display:none}
+  nav .wrap{height:auto;flex-wrap:wrap;padding-top:10px;padding-bottom:10px;gap:10px}
+  .brand{font-size:14px}
+  .btn{padding:8px 13px;font-size:13px}
+  .mobile-links{display:flex;width:100%;gap:8px;overflow-x:auto;padding-bottom:2px;-webkit-overflow-scrolling:touch}
+  .mobile-links a{flex:0 0 auto;font-size:12.5px;color:var(--muted);padding:4px 10px;border:1px solid var(--line);border-radius:999px;background:#fff}
+  .mobile-links a:hover{color:var(--ink);text-decoration:none}
+  .stats{grid-template-columns:1fr}
+  .steps{grid-template-columns:1fr}
+  .step{border-right:0!important;border-bottom:1px solid var(--line)}
+  .grid.g2,.grid.g3{grid-template-columns:1fr}
+  section{padding:54px 0}
+  header.hero{padding:56px 0 48px}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="#top">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#5b5bd6"/><path d="M9 11h14M9 16h14M9 21h9" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/></svg>
+      echo-server
+    </a>
+    <div class="nav-links">
+      <a href="#features">能力</a>
+      <a href="#fingerprints">指纹</a>
+      <a href="#lite">Lite 与性能</a>
+      <a href="#quickstart">快速开始</a>
+      <a href="#faq">常见问题</a>
+    </div>
+    <a class="btn primary" href="https://github.com/crawler-requests/echo-server/releases/latest">下载 Release</a>
+    <div class="mobile-links" aria-label="页面导航">
+      <a href="#features">能力</a>
+      <a href="#fingerprints">指纹</a>
+      <a href="#lite">性能</a>
+      <a href="#quickstart">快速开始</a>
+      <a href="#faq">常见问题</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero" id="top">
+  <div class="wrap hero-grid">
+    <div>
+      <span class="badge">单文件 Go 二进制 · 自带控制台 · MIT</span>
+      <h1>看清每一个请求<br><span class="accent">到底是谁发出的</span></h1>
+      <p class="lead">
+        回显完整的 TLS ClientHello 与 HTTP/2 指纹（JA3 / JA4 / JA4_r / JA4_o / JA4H），
+        识别调用方客户端与 UA 伪造，并给出 IP 的地理、ASN 与连接类型判定。
+        为爬虫调试、代理池验收与指纹浏览器校验而生。
+      </p>
+      <div class="cta">
+        <a class="btn primary" href="https://github.com/crawler-requests/echo-server/releases/latest">获取最新版本 →</a>
+        <a class="btn" href="https://github.com/crawler-requests/echo-server">查看源码</a>
+        <a class="btn" href="https://github.com/crawler-requests/echo-server/blob/main/README.zh-CN.md">中文文档</a>
+      </div>
+      <div class="stats">
+        <div class="stat"><b>10 万</b><span>并发连接实测（lite，零失败）</span></div>
+        <div class="stat"><b>1 个文件</b><span>部署即运行，无外部依赖</span></div>
+        <div class="stat"><b>230k+</b><span>lite 模式每秒请求数</span></div>
+      </div>
+    </div>
+
+    <div class="codecard" aria-label="响应示例">
+      <div class="bar"><i></i><i></i><i></i></div>
+<pre><span class="c">$ curl -s https://your-host:23232/echo | jq</span>
+{
+  <span class="k">"client"</span>: {
+    <span class="k">"name"</span>: <span class="s">"curl"</span>,
+    <span class="k">"family"</span>: <span class="s">"cli"</span>,
+    <span class="k">"version"</span>: <span class="s">"8.5.0"</span>,
+    <span class="k">"confidence"</span>: <span class="n">0.95</span>,
+    <span class="k">"spoofed"</span>: <span class="n">false</span>
+  },
+  <span class="k">"client_hello"</span>: {
+    <span class="k">"ja3"</span>: <span class="s">"771,4866-…,11-10-16-…"</span>,
+    <span class="k">"ja4"</span>: <span class="s">"t13i3111h2_e8f1e7e78f70_b26ce05bbdd6"</span>
+  },
+  <span class="k">"http2"</span>: {
+    <span class="k">"raw"</span>: <span class="s">"3:100,4:10485760,2:0|:method,:scheme,…"</span>
+  },
+  <span class="k">"ip"</span>: {
+    <span class="k">"connection_type"</span>: <span class="s">"datacenter"</span>,
+    <span class="k">"asn"</span>: <span class="s">"AS15169"</span>
+  }
+}</pre>
+    </div>
+  </div>
+</header>
+
+<section id="features">
+  <div class="wrap">
+    <span class="eyebrow">Capabilities</span>
+    <h2>一次请求，拿到别人拿不到的信号</h2>
+    <p class="sub">不只是回显请求头。它把 TLS 层、HTTP/2 层、客户端身份与来源情报一次算清，让你判断「对方声称是谁」与「对方实际是谁」之间的差异。</p>
+    <div class="grid g3">
+      <div class="card">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M12 3l7 4v5c0 4.2-2.9 7.6-7 9-4.1-1.4-7-4.8-7-9V7l7-4z"/><path d="M9.5 12l1.8 1.8 3.4-3.6"/></svg></div>
+        <h3>完整 TLS ClientHello</h3>
+        <p>原始字节、SNI、ALPN、加密套件与扩展全量返回，并计算 JA3 / JA4 / JA4_r / JA4_o。跨 TCP 分片与多 record 拼接，兼容后量子大握手。</p>
+        <span class="tag">per-connection capture</span>
+      </div>
+      <div class="card">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><rect x="3" y="4" width="18" height="6" rx="2"/><rect x="3" y="14" width="18" height="6" rx="2"/><path d="M7 7h.01M7 17h.01"/></svg></div>
+        <h3>HTTP/2 指纹</h3>
+        <p>SETTINGS 顺序与取值、PRIORITY 帧、伪首部顺序（Akamai 格式）。这一层即使 TLS 被伪装，也常暴露真实客户端。</p>
+        <span class="tag">SETTINGS|PRIORITY|PSEUDO</span>
+      </div>
+      <div class="card">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c0-3.9 3.1-6.5 7-6.5s7 2.6 7 6.5"/></svg></div>
+        <h3>客户端识别与 UA 伪造</h3>
+        <p>结合指纹库与 User-Agent 给出客户端名称、家族与置信度；当 TLS 与 UA 家族不一致时标记 UA 伪造。</p>
+        <span class="tag">spoof detection</span>
+      </div>
+      <div class="card">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.4 2.5 3.6 5.6 3.6 9s-1.2 6.5-3.6 9c-2.4-2.5-3.6-5.6-3.6-9S9.6 5.5 12 3z"/></svg></div>
+        <h3>IP 地理与连接类型</h3>
+        <p>国家/城市/坐标与 ASN，并判定 datacenter / residential_proxy / unknown。数据源可自定义优先级链。</p>
+        <span class="tag">multi-provider chain</span>
+      </div>
+      <div class="card">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M14 17.5h7M17.5 14v7"/></svg></div>
+        <h3>React 控制台</h3>
+        <p>内嵌在同一个二进制里：日志、大盘、指纹库检索、数据源、IP 链路、审计、通知与 Webhook，开箱即用。</p>
+        <span class="tag">/ui/ · no extra process</span>
+      </div>
+      <div class="card">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M4 7h16M4 12h10M4 17h13"/><circle cx="19" cy="12" r="1.6"/></svg></div>
+        <h3>Lite 与 Agent</h3>
+        <p>Lite 模式无数据库、只服务 /ip 与 /echo，适合代理池健康检查；内置 MCP，可被 AI Agent 直接调用。</p>
+        <span class="tag">ECHO_SERVER_LITE=1</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="fingerprints" class="alt">
+  <div class="wrap">
+    <span class="eyebrow">How it works</span>
+    <h2>四层信号，一条链路算完</h2>
+    <p class="sub">服务端在握手与首帧阶段就完成采样，随后与指纹库、数据源链与本地规则融合，最后只返回一个可直接判读的结论。</p>
+    <div class="steps">
+      <div class="step"><span class="num">01</span><h4>TLS 握手</h4><p>在 crypto/tls 消费之前 tee 原始字节，捕获完整 ClientHello。</p></div>
+      <div class="step"><span class="num">02</span><h4>HTTP/2 首帧</h4><p>解析 SETTINGS / PRIORITY / HEADERS，逐连接 HPACK 解码伪首部顺序。</p></div>
+      <div class="step"><span class="num">03</span><h4>身份融合</h4><p>JA4 指纹库 + User-Agent 交叉验证，输出客户端、置信度与伪造标记。</p></div>
+      <div class="step"><span class="num">04</span><h4>来源情报</h4><p>按优先级查询 IP 链，给出地理、ASN 与 datacenter / 住宅代理判定。</p></div>
+    </div>
+
+    <div class="grid g2" style="margin-top:28px">
+      <div class="card">
+        <h3>JA4 家族速览</h3>
+        <div class="table-wrap"><table class="table" style="margin-top:12px">
+          <thead><tr><th>字段</th><th>含义</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">JA3</td><td>经典 TLS 指纹（MD5）</td></tr>
+            <tr><td class="mono">JA4</td><td>带版本/SNI/ALPN 前缀，更抗混淆</td></tr>
+            <tr><td class="mono">JA4_r</td><td>JA4 的原始值版（不哈希）</td></tr>
+            <tr><td class="mono">JA4_o</td><td>保留扩展真实顺序</td></tr>
+            <tr><td class="mono">JA4H</td><td>HTTP 层指纹（方法/头集/Cookie）</td></tr>
+          </tbody>
+        </table></div>
+      </div>
+      <div class="card">
+        <h3>连接类型怎么判</h3>
+        <div class="table-wrap"><table class="table" style="margin-top:12px">
+          <thead><tr><th>取值</th><th>含义</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">datacenter</td><td>机房 / 云厂商（代理池、爬虫服务器常见）</td></tr>
+            <tr><td class="mono">residential_proxy</td><td>住宅代理出口，风控重点</td></tr>
+            <tr><td class="mono">unknown</td><td>证据不足，<b>不等于一定正常</b></td></tr>
+          </tbody>
+        </table></div>
+        <p style="margin-top:12px">依据：本地 CIDR 表 + 组织名关键词 + 上游权威标签（配置 Token 后更强）。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="lite">
+  <div class="wrap">
+    <span class="eyebrow">Performance</span>
+    <h2>单机 10 万并发连接，零失败</h2>
+    <p class="sub">Lite 模式关掉数据库与控制台后，/ip 变成接近内核转发成本的一行响应。下列数字可用仓库内的压测工具复现。</p>
+    <div class="table-wrap"><table class="table">
+      <thead><tr><th>模式</th><th>并发</th><th style="text-align:right">吞吐</th><th style="text-align:right">失败</th><th style="text-align:right">CPU</th></tr></thead>
+      <tbody>
+        <tr><td>lite /ip</td><td class="mono">1,000</td><td class="n">217k rps</td><td class="n good">0</td><td class="n">~2 核</td></tr>
+        <tr><td>lite /ip</td><td class="mono">10,000</td><td class="n">298k rps</td><td class="n good">0</td><td class="n">~2 核</td></tr>
+        <tr><td>lite /ip</td><td class="mono">50,000</td><td class="n">221k rps</td><td class="n good">0</td><td class="n">~2 核</td></tr>
+        <tr><td><b>lite /ip</b></td><td class="mono"><b>100,000</b></td><td class="n"><b>230k–256k rps</b></td><td class="n good"><b>0</b></td><td class="n"><b>~2 核</b></td></tr>
+      </tbody>
+    </table></div>
+    <p style="color:var(--muted);font-size:13.5px;margin-top:14px">10 万并发长连接占用 713 MB RSS（约 7.1 KB/连接）；压测机自身需要 13+ 核，瓶颈在客户端而非服务端。</p>
+  </div>
+</section>
+
+<section id="quickstart" class="alt">
+  <div class="wrap">
+    <span class="eyebrow">Quick start</span>
+    <h2>三步跑起来</h2>
+    <p class="sub">下载单个二进制即可，无需 Node、无需反向代理、无需外部数据库。</p>
+    <div class="qs">
+      <div class="codecard"><div class="bar"><i></i><i></i><i></i></div>
+<pre><span class="c"># 1. 下载并校验（以 Linux amd64 为例）</span>
+curl -LO https://github.com/crawler-requests/echo-server/releases/latest/download/checksums.txt
+curl -LO https://github.com/crawler-requests/echo-server/releases/latest/download/echo-server_&lt;ver&gt;_linux_amd64.tar.gz
+sha256sum -c checksums.txt --ignore-missing
+tar xf echo-server_&lt;ver&gt;_linux_amd64.tar.gz
+
+<span class="c"># 2. 启动（HTTPS :23232 / 控制台 :23231）</span>
+ECHO_SERVER_DB=./echo.db \
+ECHO_SERVER_ADMIN_USERNAME=admin \
+ECHO_SERVER_ADMIN_PASSWORD=<span class="s">'替换成你的密码'</span> \
+PORT=23232 HTTP_PORT=23231 ./echo-server</pre>
+      </div>
+      <div class="codecard"><div class="bar"><i></i><i></i><i></i></div>
+<pre><span class="c"># 3. 验收（全部应通过）</span>
+curl -sf http://127.0.0.1:23231/health      <span class="c"># {"status":"ok"}</span>
+curl -sf http://127.0.0.1:23231/ip          <span class="c"># 你的出网 IP</span>
+curl -sk https://127.0.0.1:23232/echo \
+  | jq '.client, .client_hello.ja4, .http2'
+
+<span class="c"># 控制台</span>
+open http://127.0.0.1:23231/ui/
+
+<span class="c"># Lite：无数据库、只服务 /ip 与 /echo</span>
+ECHO_SERVER_LITE=1 PORT=23232 HTTP_PORT=23231 ./echo-server</pre>
+      </div>
+    </div>
+    <p style="margin-top:22px;color:var(--muted);font-size:13.5px">
+      需要 docker？使用 <code class="mono">docker run -p 23231:23231 -p 23232:23232 -v echo-data:/data -e ECHO_SERVER_ADMIN_PASSWORD='…' echo-server</code>。
+      详细参数见 <a href="https://github.com/crawler-requests/echo-server/blob/main/README.zh-CN.md">中文文档</a> 与 <a href="https://github.com/crawler-requests/echo-server/blob/main/README.md">English README</a>。
+    </p>
+  </div>
+</section>
+
+<section id="faq">
+  <div class="wrap">
+    <span class="eyebrow">FAQ</span>
+    <h2>常见问题</h2>
+    <p class="sub">部署与判读中最常被问到的几件事。</p>
+    <div class="faq">
+      <details class="q"><summary>为什么 HTTPS 端口要用自签证书？<span class="chev">›</span></summary>
+        <div class="a">回显服务要抓到 TLS ClientHello 与 JA4，就必须自己终结 TLS；用自签证书可以开箱即用。生产环境建议换成正式证书或放在反向代理后面，并把明文控制台端口 <code>HTTP_PORT</code> 关掉或仅绑内网。</div>
+      </details>
+      <details class="q"><summary>JA4 说我是 Chrome，但我其实是 curl，会怎样？<span class="chev">›</span></summary>
+        <div class="a">这正是「UA 伪造」检测的场景：响应里 <code>client.spoofed=true</code>，并说明 TLS 指纹指向哪个客户端。用它来验证你的指纹浏览器 / curl-impersonate 是否真的伪装成功。</div>
+      </details>
+      <details class="q"><summary>connection_type 显示 unknown，是不是说明我的 IP 干净？<span class="chev">›</span></summary>
+        <div class="a">不一定。unknown 只表示本地表与上游都没给出证据，<b>不能</b>当作「住宅 / 正常」的结论。想提高判定率，可在控制台配置更全的 CIDR 数据源，或填写 ipinfo Token 获取权威标签。</div>
+      </details>
+      <details class="q"><summary>Lite 和完整版有什么区别？<span class="chev">›</span></summary>
+        <div class="a">同一个二进制，用 <code>ECHO_SERVER_LITE=1</code> 启动。Lite 无 SQLite、无账号、无控制台与控制 API、不写日志，只服务 <code>/ip</code>、<code>/echo</code>、<code>/health</code>、<code>/metrics</code>。适合对并发与延迟敏感的代理池与探活场景。</div>
+      </details>
+      <details class="q"><summary>数据源（指纹库、CIDR 表）怎么更新？<span class="chev">›</span></summary>
+        <div class="a">控制台「数据源」页支持内置、本地文件、远程 URL 与本地命令四种来源，按优先级合并。远程与命令型可设刷新间隔自动同步，也可手动同步；本地文件在变更时自动重载。</div>
+      </details>
+      <details class="q"><summary>能被 AI Agent 调用吗？<span class="chev">›</span></summary>
+        <div class="a">可以。同一二进制支持 MCP（stdio）：<code>echo-server --mcp</code>。Agent 能查询链、看客户端识别、搜索指纹库、读日志与大盘，签发密码重置令牌需 admin 级凭据。</div>
+      </details>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap foot">
+    <div>
+      <div class="brand" style="font-size:15px;margin-bottom:6px">
+        <svg viewBox="0 0 32 32" aria-hidden="true" style="width:22px;height:22px"><rect width="32" height="32" rx="8" fill="#5b5bd6"/><path d="M9 11h14M9 16h14M9 21h9" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/></svg>
+        echo-server
+      </div>
+      <div>自托管 · 单文件 · MIT License · © crawler-requests</div>
+    </div>
+    <div class="foot-links">
+      <a href="https://github.com/crawler-requests/echo-server">GitHub</a>
+      <a href="https://github.com/crawler-requests/echo-server/releases">Releases</a>
+      <a href="https://github.com/crawler-requests/echo-server/blob/main/README.zh-CN.md">文档</a>
+      <a href="https://github.com/crawler-requests/echo-server/blob/main/SECURITY.md">安全策略</a>
+      <a href="https://github.com/crawler-requests/echo-server/issues">反馈</a>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>

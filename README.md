@@ -1,5 +1,7 @@
 # echo-server
 
+**Website:** https://crawler-requests.github.io/echo-server/
+
 **English** | [简体中文](README.zh-CN.md)
 
 [![CI](https://github.com/crawler-requests/echo-server/actions/workflows/ci.yml/badge.svg)](https://github.com/crawler-requests/echo-server/actions/workflows/ci.yml)
@@ -176,6 +178,31 @@ The image is a small Alpine runtime with the same self-contained binary (CA root
 included); the SQLite database lives on the `/data` volume. Omit the `ECHO_SERVER_ADMIN_*`
 variables to use the first-run setup wizard at `/ui/` instead.
 
+### Behind a reverse proxy (subpath mounts work)
+
+The console runs at the site root (`/ui/`) or under a prefix such as `/echo-srv/ui/` with no rebuild:
+assets are emitted relative and the app derives its router basename and API base from the URL it was
+actually loaded from. Point the proxy at the plain HTTP listener and strip the prefix:
+
+```nginx
+location = /echo-srv { return 301 $scheme://$http_host/echo-srv/; }
+location ^~ /echo-srv/ {
+    proxy_pass http://127.0.0.1:23231/;      # trailing slash strips the prefix
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
+`^~` matters: a regex location for static files (`\.js$`, …) otherwise wins and 404s the bundle —
+which is exactly the blank white page you get when only `location /echo-srv/` is used. Deep links
+(`/echo-srv/ui/logs`) survive a refresh, and redirects are relative so they stay inside the prefix.
+
+JA3/JA4/h2 fingerprints are captured from the TLS handshake, so they only exist on the HTTPS listener
+(`PORT`, default 23232); proxying the plain listener gives you everything else. If you proxy HTTPS,
+forward raw TCP or use `proxy_ssl_*` — the proxy's own handshake is what gets fingerprinted otherwise.
+
 ## Lite build & concurrency
 
 `ECHO_SERVER_LITE=1` starts the binary in lite mode: **no SQLite, no users, no datasets, no admin API, no
@@ -232,7 +259,7 @@ curl -k https://HOST:23232/ip?format=text       # 203.0.113.42
 curl -k http://HOST:23231/ip                    # plain HTTP listener, no TLS at all
 ```
 
-It honours `X-Forwarded-For` / `X-Real-IP` / `CF-Connecting-IP` the same way `/echo` does, returns
+It honours `X-Forwarded-For` / `X-Real-IP` / `CF-Connecting-IP` the same way `/echo` does (only when the TCP peer is a trusted proxy, configured via `trusted_proxies`), returns
 `Cache-Control: no-store`, and is counted in `/metrics` as `echo_ip_only_requests_total`. It deliberately
 writes no query-log row, so a proxy-pool health check does not drown the console history.
 
@@ -541,10 +568,12 @@ so you can still tell Bearer from Basic). Turn it off in *回显设置* only whe
   body into memory. Set `body_limit_kb` to a smaller value for a tighter cap.
 - **Rate limiting and IP rules** charge both the claimed client address (`X-Forwarded-For`) and the TCP
   peer, so rotating a spoofed header cannot escape the per-minute budget or an allowlist.
-- **Login / setup / register** are throttled per TCP peer (10 failures or 30 attempts per 15 minutes).
-  This throttle is always on and independent of `rate_limit_per_min`.
+- **Login / setup / register** are throttled per resolved client (10 failures or 30 attempts per
+  15 minutes). Behind a trusted proxy the proxy-appended address is used, so one account's failures
+  cannot lock out everyone sharing the proxy's TCP peer. This throttle is always on and independent
+  of `rate_limit_per_min`.
 - **SQLite indexes**: `query_log` is indexed on `ts`, `ip` and `(connection_type, country)`; `audit_log`
-  on `ts`, `username` and `action`; plus `notifications(read, ts)`, `api_keys(key_hash)`,
+  on `ts`, `username` and `action`; plus `notifications(ts)`, the `notification_reads` primary key, `api_keys(key_hash)`,
   `webhooks(enabled)` and `saved_views(page)`. `TestQueryLogIndexesAreUsed` asserts the planner picks
   them for the console's filter shapes.
 
@@ -633,7 +662,13 @@ the `initialize` handshake, and refuses admin-only tools with a readable message
 - Outbound URLs (IP providers, remote datasets) are refused when they point at loopback, RFC 1918,
   link-local or cloud-metadata addresses — checked when the provider is saved and again on every dial.
 - `file` data sources may only read inside `ECHO_SERVER_DATA_DIR` (default: the dataset cache directory).
+  Paths and directory entries are resolved through symlinks; a link (including a linked parent directory)
+  whose target leaves the sandbox is refused.
 - Login timing is equalised so response time does not reveal whether an account exists.
+- Changing a password (self-service, admin reset or token redemption) invalidates every JWT issued
+  before it; the browser tab that made the change receives a replacement token.
+- Self-service registration stops at 1000 accounts. Admins can still create accounts past that
+  ceiling; the limit exists so public signup cannot grow the users table without bound.
 
 ## Admin UI & API
 
@@ -667,7 +702,7 @@ account issues a **one-time reset token**:
   immediately afterward,
 - no email is required (this product has no SMTP dependency); deliver the token over whatever private
   channel you already share,
-- issuance and redemption are both written to the audit trail, and redemption is rate-limited per peer.
+- issuance and redemption are both written to the audit trail, and redemption is rate-limited per resolved client.
 
 **2. Offline, last resort (nobody can log in, e.g. the only admin forgot).** Stop the server and run the
 binary in reset mode against the database — this needs local access to the DB file, which is exactly the
@@ -712,11 +747,18 @@ section is its own route (`/ui/users`, `/ui/logs`, …), so links and refreshes 
 ### Security controls (API keys, IP rules, maintenance)
 
 Configuration keys added for the security page: `ip_allowlist` / `ip_denylist` (IP, CIDR, comma or newline
-separated; deny wins, an empty allowlist means allow-all), `rate_limit_per_min` (charged against both the
+separated; deny wins, an empty allowlist means allow-all), `trusted_proxies` (IP/CIDR list of reverse proxies
+whose `X-Forwarded-For` and friends are believed for IP rules and audit; when empty only a loopback peer is
+treated as a proxy — list other hosts/containers explicitly — so a direct client cannot spoof past the
+allow/deny lists), `rate_limit_per_min` (charged against both the
 claimed IP and the TCP peer, echo traffic only, `0` disables), `body_limit_kb` (echo request body cap; `0` keeps
-the built-in 8 MB cap), `cors_origins`, `security_headers`,
+the built-in 8 MB cap. JSON `/api` bodies are capped before the handler too — 1 MB by default, or a smaller
+`body_limit_kb` — and oversized requests get `413`), `cors_origins`, `security_headers`,
 `maintenance_mode` / `maintenance_message` (unauthenticated echo calls get `503`, the console/API stay usable),
-`log_retention_days` (background purge every 6 hours) and the site keys `site_name` / `site_description` /
+`log_retention_days` (background purge every 6 hours), `log_max_rows` (total query-log row ceiling, 1,000,000 by
+default; the maintenance job deletes the oldest rows, `0` disables the ceiling),
+`webhook_allow_private` (off by default: webhook delivery goes through the SSRF dial guard and may only reach
+public targets; set `true` to allow loopback/LAN endpoints) and the site keys `site_name` / `site_description` /
 `timezone` / `locale` / `density`. IP rules, rate limiting and maintenance mode apply to echo traffic only, so the
 console never locks the operator out. Login/setup/register carry a separate, always-on per-TCP-peer throttle.
 
@@ -733,7 +775,10 @@ exports CSV. `user.*`, `security.*`, `config.*` and `system.*` events also creat
 (`/api/notifications`) that drive the header badge. Webhooks (`/api/webhooks`) POST a JSON payload to any URL for
 subscribed events, signed with `X-Echo-Signature: sha256=<hmac>` over the body using the per-webhook secret
 (`X-Echo-Event` carries the event name); delivery is asynchronous with an 8s timeout, and failures raise a
-warning notification. A test endpoint (`POST /api/webhooks/test`) sends a sample payload immediately.
+warning notification. Redirects are not followed, and the destination is checked at dial time (public
+addresses only by default, so a webhook cannot be used as an SSRF pivot into loopback, the LAN or cloud
+metadata); set `webhook_allow_private=true` to deliver to private endpoints. A test endpoint
+(`POST /api/webhooks/test`) sends a sample payload immediately.
 
 ### Observability, export, backup and replay
 
@@ -777,12 +822,12 @@ When *require API token* is on, echo requests need `X-API-Token: <token>` (or `?
 | `GET /api/logs?limit=N` | JWT | recent query history (default 50, max 500) |
 | `GET/POST/DELETE /api/ipproviders` | JWT / admin write | IP lookup chain (list, add/update, delete) |
 | `POST /api/ipproviders/test` | admin JWT | query one IP through the lookup chain |
-| `GET/POST /api/ip/lookup` | JWT | look up IPs the caller names (`?ip=`, `&nocache=1`, or `{"ips":[…]}`, max 100); one address returns the bare IP object |
-| `POST /api/ip/lookup/bulk` | JWT | plain-text batch (one address per line or comma separated), same response shape |
+| `GET/POST /api/ip/lookup` | JWT | look up IPs the caller names (`?ip=`, `&nocache=1`, or `{"ips":[…]}`, max 100); one address returns the bare IP object; 600 lookups/min per client |
+| `POST /api/ip/lookup/bulk` | JWT | plain-text batch (one address per line or comma separated), same response shape and budget |
 | `GET /api/ip/history?ip=` | JWT | whether/how that IP called `/echo`, from the query log |
 | `GET /api/logs` | JWT | filtered history (`limit/method/country/type/ip/q/days`) |
 | `GET /api/audit`, `/api/audit/export.csv` | JWT | audit trail (`limit/action/username`, CSV export) |
-| `GET/POST/DELETE /api/notifications` | JWT | list/unread count, mark one/all read, cleanup |
+| `GET/POST/DELETE /api/notifications` | JWT | list/unread count (read state is per account), mark one/all read; cleanup is admin-only |
 | `GET/POST/DELETE /api/views` | JWT | saved query-log filter views |
 | `GET/POST/PATCH/DELETE /api/apikeys` | admin JWT | named API keys (`X-API-Key`; plaintext returned once) |
 | `GET/POST/PATCH/DELETE /api/webhooks` | admin JWT | signed event delivery |
@@ -883,7 +928,7 @@ Limitations you should expect:
 - **Anycast** (8.8.8.8, 1.1.1.1, CDN edges) has no single city; providers disagree by design. Prefer `anycast: true` from ipinfo and treat city as unknown.
 - **VPN / proxy / mobile** locations describe the exit node or carrier gateway, not the human.
 - **China** city-level accuracy is materially lower than in North America/Europe with free international APIs (measured 47.8% city / 66.2% province); use a domestic database (IPIP, pconline) or an ipinfo token if China precision matters.
-- **X-Forwarded-For is trusted by design** for proxy deployments. Any client can send it, so `ip` is not an authenticated identity. Use the TCP peer (`remote_addr`) when trust matters, or put the service behind a proxy that overwrites the header.
+- **X-Forwarded-For is only honoured from trusted proxies** (loopback by default, or `trusted_proxies`); a direct client cannot spoof its allowlist entry. It is still a claim, not an authenticated identity — use `remote_addr` when trust matters, and keep the proxy list narrow (a broad CIDR lets every host in it spoof the header).
 - **Offline `connection_type`** covers 99–100% of AWS/GCP/DigitalOcean/Cloudflare/Oracle/Akamai official prefixes, and a random public-IP sample showed ~0.2% datacenter false positives, but recall on hosting ASNs outside those lists is low (~3%) and the embedded residential-proxy table has only 100 exits, so offline proxy detection is nearly always `unknown`. Keep the tables current with the data-source engine, or use an ipinfo token for privacy labels and `hosting`.
 - **Latency**: online lookups run synchronously on the echo path. A cache miss costs the provider's response time (ipwho.is median 365 ms, p90 380 ms in this test); when ipwho.is is unavailable the chain falls through to ip-api (median ~1.2 s, p90 ~4 s at its 4 s timeout). Cached hits are ~5 ms. Keep the chain short if you need a hard latency bound.
 - **Cache TTL** (24h default) can delay reassignment changes; `residential_proxy` also covers VPN/Tor exits reported by ipinfo.

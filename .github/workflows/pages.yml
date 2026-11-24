@@ -1,0 +1,71 @@
+name: Deploy site to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time; a queued run is superseded by the next push.
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build site artifact
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Validate the static site
+        run: |
+          set -euo pipefail
+          test -f docs/index.html || { echo "::error::docs/index.html is missing"; exit 1; }
+          # A hand-written page that grows a broken relative link is worse than
+          # no link at all: check every local href/src actually exists.
+          python3 - <<'PY'
+          import os, re, sys
+          root = "docs"
+          html = open(os.path.join(root, "index.html"), encoding="utf-8").read()
+          bad = []
+          for m in re.finditer(r'(?:href|src)="([^"]+)"', html):
+              url = m.group(1)
+              if url.startswith(("http://", "https://", "#", "mailto:", "data:")):
+                  continue
+              rel = url.split("#")[0].split("?")[0]
+              if rel.startswith("/"):
+                  bad.append(url + " (absolute path breaks under /echo-server/)"); continue
+              if not rel:
+                  continue
+              target = os.path.join(root, rel)
+              if not os.path.exists(target) and not os.path.exists(os.path.join(target, "index.html")):
+                  bad.append(url)
+          if bad:
+              print("::error::broken local links: " + ", ".join(bad)); sys.exit(1)
+          print("local links OK")
+          PY
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+
+  deploy:
+    name: Deploy
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

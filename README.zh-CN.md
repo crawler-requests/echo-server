@@ -1,5 +1,7 @@
 # echo-server
 
+**官网：** https://crawler-requests.github.io/echo-server/
+
 [English](README.md) | **简体中文**
 
 [![CI](https://github.com/crawler-requests/echo-server/actions/workflows/ci.yml/badge.svg)](https://github.com/crawler-requests/echo-server/actions/workflows/ci.yml)
@@ -170,6 +172,30 @@ docker run -d --name echo-server \
 镜像基于精简的 Alpine 运行时，内部是同一个自包含二进制（含 CA 根证书与 tzdata）；SQLite 数据库位于
 `/data` 卷。若不设置 `ECHO_SERVER_ADMIN_*`，可通过 `/ui/` 的首次初始化向导创建管理员。
 
+### 挂在反向代理的子路径下
+
+控制台既可以在站点根（`/ui/`），也可以挂在 `/echo-srv/ui/` 这样的前缀下，**不需要为每次部署重新构建**：
+前端资源使用相对路径，路由 basename 与 API 基址都由页面实际被加载的 URL 推导出来。让代理指向明文
+HTTP 监听并按前缀转发（尾斜杠会把前缀剥掉）：
+
+```nginx
+location = /echo-srv { return 301 $scheme://$http_host/echo-srv/; }
+location ^~ /echo-srv/ {
+    proxy_pass http://127.0.0.1:23231/;      # 末尾斜杠 = 剥掉前缀
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
+`^~` 不能省：静态文件的 regex location（`\.js$` 之类）优先级更高，会把整个 bundle 404 掉——这正是只写
+`location /echo-srv/` 时页面白屏的原因。深链接（`/echo-srv/ui/logs`）刷新后仍能正常渲染，重定向使用相对
+路径，不会把浏览器带出前缀。
+
+JA3/JA4/h2 指纹来自 TLS 握手，只有 HTTPS 监听（`PORT`，默认 23232）才有；反代明文监听则拿不到指纹，
+其余能力不受影响。如果要反代 HTTPS，请透传 TCP 或使用 `proxy_ssl_*`，否则被指纹的是代理自身的握手。
+
 ## 极速版与并发
 
 `ECHO_SERVER_LITE=1` 让二进制进入极速模式：**无 SQLite、无用户、无数据集、无管理 API、无查询日志**。
@@ -222,7 +248,8 @@ curl -k https://HOST:23232/ip?format=text       # 203.0.113.42
 curl -k http://HOST:23231/ip                    # 明文监听，完全不走 TLS
 ```
 
-它和 `/echo` 一样遵循 `X-Forwarded-For` / `X-Real-IP` / `CF-Connecting-IP`，返回
+它和 `/echo` 一样遵循 `X-Forwarded-For` / `X-Real-IP` / `CF-Connecting-IP`（仅当 TCP 对端是可信代理时，
+并通过 `trusted_proxies` 配置），返回
 `Cache-Control: no-store`，并在 `/metrics` 中计入 `echo_ip_only_requests_total`。它**刻意不写查询日志**，
 因此代理池健康检查不会把控制台历史刷爆。
 
@@ -518,12 +545,12 @@ TLS 伪装工具（curl_cffi、uTLS）能把 JA3/JA4 抄得一模一样，所以
   查询或大上传），关闭 SQLite 后退出。
 - **回显请求体上限**：即使 `body_limit_kb=0` 也有 8MB 硬上限，因为处理逻辑会把整个 body 读进内存；
   需要更严格可把 `body_limit_kb` 设小。
-- **限流与 IP 规则**同时按声明的客户端地址（`X-Forwarded-For`）与 TCP 对端计费，轮换伪造的请求头
+- **限流与 IP 规则**同时按解析出的客户端地址与 TCP 对端计费，轮换伪造的请求头
   无法逃逸每分钟配额或允许列表。
-- **登录 / 初始化 / 注册**按 TCP 对端限流（15 分钟内 10 次失败或 30 次尝试），始终开启，与
-  `rate_limit_per_min` 无关。
+- **登录 / 初始化 / 注册**按解析出的客户端限流（15 分钟内 10 次失败或 30 次尝试），始终开启，与
+  `rate_limit_per_min` 无关；可信代理之后按代理追加的真实地址计费，不会让一个人锁死所有账号。
 - **SQLite 索引**：`query_log` 按 `ts`、`ip`、`(connection_type, country)` 建索引；`audit_log` 按
-  `ts`、`username`、`action`；另有 `notifications(read, ts)`、`api_keys(key_hash)`、
+  `ts`、`username`、`action`；另有 `notifications(ts)`、`notification_reads` 主键、`api_keys(key_hash)`、
   `webhooks(enabled)`、`saved_views(page)`。`TestQueryLogIndexesAreUsed` 断言查询计划确实命中它们。
 
 ### 重新生成 `data/ja4db.json`（多源融合）
@@ -610,8 +637,13 @@ claude mcp add echo-server \
 
 - 出站 URL（IP Provider、远端数据集）指向回环、RFC 1918、链路本地或云元数据地址时会被拒绝——在保存
   Provider 时检查一次，并在每次拨号时再次检查。
-- `file` 数据源只能读取 `ECHO_SERVER_DATA_DIR`（默认：数据集缓存目录）内的文件。
+- `file` 数据源只能读取 `ECHO_SERVER_DATA_DIR`（默认：数据集缓存目录）内的文件。路径与目录条目都会
+  解析符号链接；链接（包括父目录链接）的目标一旦指向沙箱外就会被拒绝。
 - 登录耗时会做均衡，响应时间无法用于判断账号是否存在。
+- 修改密码（自助修改、管理员重置或令牌兑付）会让此前签发的所有 JWT 立即失效；发起修改的浏览器
+  标签页会收到替换后的新令牌，其余设备需重新登录。
+- 自助注册上限为 1000 个账号；达到上限后管理员仍可直接创建账号。该上限用于防止公开注册无限
+  增长用户表。
 
 ## 管理 UI 与 API
 
@@ -637,7 +669,7 @@ PBKDF2-SHA256（21 万次迭代）存储。JWT 签名密钥来自 `ECHO_SERVER_J
 - 30 分钟有效、一次性使用；为同一账号重新签发会让旧令牌失效，
 - 用户在 `/ui/` 点**忘记密码？**，粘贴令牌并设置新密码，随即自动登录，
 - 不依赖邮件（本产品没有 SMTP 依赖），令牌通过你们已有的私下渠道转交即可，
-- 签发与兑付都会写入审计日志，兑付按 TCP 对端限流。
+- 签发与兑付都会写入审计日志，兑付按解析后的客户端地址限流。
 
 **2. 离线兜底（没人能登录，例如唯一的管理员忘了密码）。** 停掉服务，用重置模式直接操作数据库——这需要
 本机对数据库文件的访问权，正是这个操作应有的信任边界：
@@ -680,12 +712,17 @@ PBKDF2-SHA256（21 万次迭代）存储。JWT 签名密钥来自 `ECHO_SERVER_J
 ### 安全控制（API Key、IP 规则、维护模式）
 
 安全页新增的配置键：`ip_allowlist` / `ip_denylist`（IP、CIDR，逗号或换行分隔；拒绝优先，空允许列表
-表示全部允许）、`rate_limit_per_min`（按客户端 IP 与 TCP 对端双重计费，仅回显流量，`0` 关闭）、
-`body_limit_kb`（回显请求体上限；`0` 时仍保留内置 8MB 硬上限）、`cors_origins`、`security_headers`、
+表示全部允许）、`trusted_proxies`（可信反向代理的 IP/CIDR 列表；仅来自这些对端的 `X-Forwarded-For`
+等转发头会参与 IP 规则与审计。留空时只有回环对端被视为代理（代理在其他主机或容器时需显式列出），
+因此直接暴露在公网或私网的客户端都无法靠伪造 `X-Forwarded-For` 绕过允许/拒绝列表）、`rate_limit_per_min`（按客户端 IP 与 TCP 对端双重计费，仅回显流量，`0` 关闭）、
+`body_limit_kb`（回显请求体上限；`0` 时仍保留内置 8MB 硬上限。`/api` 的 JSON 请求在进入处理器前
+同样有上限——默认 1MB，或更小的 `body_limit_kb`——超限直接返回 `413`）、`cors_origins`、`security_headers`、
 `maintenance_mode` / `maintenance_message`（未认证回显请求返回 `503`，控制台/API 仍可用）、
-`log_retention_days`（每 6 小时后台清理）以及站点键 `site_name` / `site_description` / `timezone` /
+`log_retention_days`（每 6 小时后台清理）、`log_max_rows`（查询日志总行数上限，默认 100 万，维护任务
+裁剪最旧的行；`0` 关闭该上限）、`webhook_allow_private`（默认关闭：Webhook 投递经过 SSRF 防护，只允许
+公网目标；确需投递到内网/回环时显式设为 `true`）以及站点键 `site_name` / `site_description` / `timezone` /
 `locale` / `density`。IP 规则、限流与维护模式只作用于回显流量，因此控制台永远不会把运维人员锁在外面；
-登录/初始化/注册另有独立的按 TCP 对端限流。
+登录/初始化/注册另有独立的按解析客户端限流（可信代理之后按代理追加的真实地址，避免共享代理对端被一个人耗尽预算而锁死所有人）。
 
 命名 API Key（`/api/apikeys`）是共享 token 的替代方案：明文 `esk_…` 密钥**只在创建时返回一次**，
 仅存储其 SHA-256；每个 Key 有 scope（`viewer`/`admin`）和可选过期时间，`last_used` 异步更新。通过
@@ -698,7 +735,9 @@ PBKDF2-SHA256（21 万次迭代）存储。JWT 签名密钥来自 `ECHO_SERVER_J
 `config.*` 和 `system.*` 事件还会创建应用内通知（`/api/notifications`），驱动顶部角标。Webhook
 （`/api/webhooks`）对订阅事件向任意 URL POST JSON，使用每个 Webhook 的密钥对请求体计算
 `X-Echo-Signature: sha256=<hmac>`（`X-Echo-Event` 携带事件名）；投递异步进行、超时 8 秒，失败会生成
-警告通知。测试端点（`POST /api/webhooks/test`）立即发送示例载荷。
+警告通知。投递不会跟随 3xx 重定向，并在拨号时校验目标（默认只允许公网地址，防止 Webhook 被用作访问
+回环、内网或云元数据的 SSRF 跳板）；需要投递到内网时显式设置 `webhook_allow_private=true`。测试端点
+（`POST /api/webhooks/test`）立即发送示例载荷。
 
 ### 可观测性、导出、备份与重放
 
@@ -742,12 +781,12 @@ PBKDF2-SHA256（21 万次迭代）存储。JWT 签名密钥来自 `ECHO_SERVER_J
 | `GET /api/logs?limit=N` | JWT | 最近查询历史（默认 50，最大 500） |
 | `GET/POST/DELETE /api/ipproviders` | JWT / admin 写入 | IP 查询链路（列出、新增/更新、删除） |
 | `POST /api/ipproviders/test` | admin JWT | 通过查询链路查询一个 IP |
-| `GET/POST /api/ip/lookup` | JWT | 查询指定 IP（`?ip=`、`&nocache=1` 或 `{"ips":[…]}`，最多 100 个）；单个地址直接返回 IP 对象 |
-| `POST /api/ip/lookup/bulk` | JWT | 纯文本批量（每行一个或用逗号分隔），响应结构相同 |
+| `GET/POST /api/ip/lookup` | JWT | 查询指定 IP（`?ip=`、`&nocache=1` 或 `{"ips":[…]}`，最多 100 个）；单个地址直接返回 IP 对象；每客户端 600 次/分钟 |
+| `POST /api/ip/lookup/bulk` | JWT | 纯文本批量（每行一个或用逗号分隔），响应结构相同，共用同一配额 |
 | `GET /api/ip/history?ip=` | JWT | 该 IP 是否/如何调用过 `/echo`，取自查询日志 |
 | `GET /api/logs` | JWT | 筛选历史（`limit/method/country/type/ip/q/days`） |
 | `GET /api/audit`、`/api/audit/export.csv` | JWT | 审计日志（`limit/action/username`，CSV 导出） |
-| `GET/POST/DELETE /api/notifications` | JWT | 列表/未读数、标记单条/全部已读、清理 |
+| `GET/POST/DELETE /api/notifications` | JWT | 列表/未读数（已读状态按账号隔离）、标记单条/全部已读、仅管理员可清理 |
 | `GET/POST/DELETE /api/views` | JWT | 保存的查询日志筛选视图 |
 | `GET/POST/PATCH/DELETE /api/apikeys` | admin JWT | 命名 API Key（`X-API-Key`；明文只返回一次） |
 | `GET/POST/PATCH/DELETE /api/webhooks` | admin JWT | 带签名的事件投递 |
@@ -845,7 +884,7 @@ Team Cymru 交叉核对；中国样本再对照 zxinc 国内库。
 - **Anycast**（8.8.8.8、1.1.1.1、CDN 边缘）没有唯一城市，各家结果天然不一致；看到 ipinfo 的 `anycast: true` 时应把城市视为未知。
 - **VPN / 代理 / 移动网络**描述的是出口节点或运营商网关，不是真人位置。
 - **中国**城市级精度明显低于北美/欧洲的免费国际 API（实测 47.8% 城市 / 66.2% 省级）；需要中国精度时请用国内库（IPIP、pconline）或 ipinfo token。
-- **`X-Forwarded-For` 按设计被信任**，以适配反向代理；任何客户端都能伪造，所以 `ip` 不是可信身份。需要可信来源时看 TCP 对端 `remote_addr`，或确保前置代理覆盖该头。
+- **`X-Forwarded-For` 仅信任来自可信代理的值**（默认仅回环，或用 `trusted_proxies` 显式列出）；直连客户端无法伪造自己的允许列表身份。它仍然只是声明而非认证身份——需要可信来源时看 TCP 对端 `remote_addr`，并保持代理列表足够窄（宽泛 CIDR 会让其中每台主机都能伪造该头）。
 - **离线 `connection_type`** 对 AWS/GCP/DigitalOcean/Cloudflare/Oracle/Akamai 官方前缀覆盖 99–100%，随机公网样本上误判 datacenter 约 0.2%；但对表外的小型托管 ASN 召回很低（约 3%），且内置住宅代理表只有 100 个出口，离线代理识别几乎总是 `unknown`。请用数据源引擎保持表更新，或配置 ipinfo token 获取隐私标签与 `hosting`。
 - **延迟**：在线查询在回显路径上同步执行。缓存未命中时耗时即为 Provider 的响应时间（本次 ipwho.is 中位 365ms、p90 380ms）；ipwho.is 不可用时链路降级到 ip-api（中位约 1.2s、p90 约 4s，即其超时上限）。命中缓存约 5ms。需要严格延迟上限时请缩短链路。
 - **缓存 TTL**（默认 24h）会延迟 IP 重新分配后的变化；`residential_proxy` 也覆盖 ipinfo 报告的 VPN/Tor 出口。
