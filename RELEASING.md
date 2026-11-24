@@ -50,9 +50,11 @@ is designed so a release is a repeatable 15-minute operation.
      curl -sf http://127.0.0.1:23231/health
      docker image inspect ghcr.io/crawler-requests/echo-server:v1.0.0 --format '{{.Architecture}}'
      ```
-     The package must be **public** for anonymous pulls: GHCR inherits the repository's visibility on
-     first publish, but if the pull above fails with `unauthorized`, open
-     *Org → Packages → echo-server → Settings* and set visibility to *Public* once.
+     The package must be **public** for anonymous pulls, and GHCR does **not** inherit the
+     repository's visibility — the first publish creates it private, so a bare `docker pull` fails
+     with `denied` / `unauthorized` even though the push succeeded. Set it once:
+     *Org → Packages → echo-server → Package settings → Danger Zone → Change visibility → Public*.
+     If the pull succeeds without credentials afterwards, it stays that way for all later releases.
 6. **Post-release**
    - Announce in the project README/discussions if applicable.
    - Bump `serverVersion`'s development default only if the project starts cutting maintenance
