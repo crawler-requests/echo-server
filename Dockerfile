@@ -40,6 +40,11 @@ USER echo
 ENV ECHO_SERVER_DB=/data/echo.db
 VOLUME ["/data"]
 EXPOSE 23231 23232
-HEALTHCHECK --interval=30s --timeout=3s --start-period=10s \
-  CMD wget -qO- http://127.0.0.1:23231/health || exit 1
+# The binary probes itself instead of hard-coding the plain-HTTP port: with
+# HTTP_PORT=0 (HTTPS-only) or a moved plain port, `wget ...:23231` dials a
+# closed socket and the container is reported unhealthy forever. The CMD form
+# runs through the container shell and resolves the binary on PATH; the string
+# spelling is what Docker records as ["CMD-SHELL","echo-server healthcheck"].
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD echo-server healthcheck || exit 1
 ENTRYPOINT ["echo-server"]

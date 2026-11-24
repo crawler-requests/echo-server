@@ -141,6 +141,13 @@ func main() {
 		runMCPServer()
 		return
 	}
+	// Container health probe (see healthcheck.go): exit 0 when this deployment
+	// answers /health, 1 otherwise. It runs before the database is opened so a
+	// probe never creates or migrates one.
+	if hasHealthcheckFlag(os.Args[1:]) {
+		runHealthcheck()
+		return
+	}
 
 	port := os.Getenv("PORT")
 	if port == "" {

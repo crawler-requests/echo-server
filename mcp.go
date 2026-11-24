@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -445,7 +446,9 @@ func (c *mcpClient) isAdmin() bool { return c.admin }
 
 // probeReachable reports whether a listener answers /health.
 func probeReachable(base string) bool {
-	tr := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
+	// Trust the self-signed certificate only on loopback, the one place where
+	// there is no one to sit in the middle (the MCP client reasons the same way).
+	tr := &http.Transport{TLSClientConfig: mcpTLSForProbe(base)}
 	cl := &http.Client{Transport: tr, Timeout: 2 * time.Second}
 	resp, err := cl.Get(base + "/health")
 	if err != nil {
@@ -453,6 +456,24 @@ func probeReachable(base string) bool {
 	}
 	resp.Body.Close()
 	return resp.StatusCode == http.StatusOK
+}
+
+// mcpTLSForProbe skips certificate verification for a loopback probe only.
+func mcpTLSForProbe(base string) *tls.Config {
+	insecure := true
+	if u, err := url.Parse(base); err == nil && !mcpLoopbackHostForProbe(u.Hostname()) {
+		insecure = false
+	}
+	return &tls.Config{InsecureSkipVerify: insecure, MinVersion: tls.VersionTLS12}
+}
+
+// mcpLoopbackHostForProbe reports whether host names this machine.
+func mcpLoopbackHostForProbe(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func (c *mcpClient) newRequest(path string) (*http.Request, error) {
