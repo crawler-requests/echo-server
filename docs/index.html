@@ -213,14 +213,18 @@ footer{border-top:1px solid var(--line);padding:40px 0 56px;background:var(--bg-
 
     <div class="codecard" aria-label="响应示例">
       <div class="bar"><i></i><i></i><i></i></div>
-<pre><span class="c">$ curl -s https://your-host:23232/echo | jq</span>
+<pre><span class="c">$ curl -sk https://your-host:23232/echo | jq</span>
 {
   <span class="k">"client"</span>: {
     <span class="k">"name"</span>: <span class="s">"curl"</span>,
     <span class="k">"family"</span>: <span class="s">"cli"</span>,
     <span class="k">"version"</span>: <span class="s">"8.5.0"</span>,
     <span class="k">"confidence"</span>: <span class="n">0.95</span>,
-    <span class="k">"spoofed"</span>: <span class="n">false</span>
+    <span class="k">"source"</span>: <span class="s">"user_agent"</span>,
+    <span class="k">"matches"</span>: [
+      <span class="s">"JA4 exact match: t13i3111h2_…"</span>,
+      <span class="s">"User-Agent: curl/8.5.0"</span>
+    ]
   },
   <span class="k">"client_hello"</span>: {
     <span class="k">"ja3"</span>: <span class="s">"771,4866-…,11-10-16-…"</span>,
@@ -378,7 +382,9 @@ ECHO_SERVER_LITE=1 PORT=23232 HTTP_PORT=23231 ./echo-server</pre>
       </div>
     </div>
     <p style="margin-top:22px;color:var(--muted);font-size:13.5px">
-      需要 docker？使用 <code class="mono">docker run -p 23231:23231 -p 23232:23232 -v echo-data:/data -e ECHO_SERVER_ADMIN_PASSWORD='…' echo-server</code>。
+      需要 docker？镜像已发布到 GitHub 的镜像仓库（amd64/arm64），直接拉取即可：
+      <code class="mono">docker run -d -p 23231:23231 -p 23232:23232 -v echo-data:/data -e ECHO_SERVER_ADMIN_PASSWORD='…' ghcr.io/crawler-requests/echo-server:latest</code>
+      （容器以非特权 UID 10001 运行；若改为绑定宿主机目录，请先 <code class="mono">chown 10001:10001</code> 该目录）。
       详细参数见 <a href="https://github.com/crawler-requests/echo-server/blob/main/README.zh-CN.md">中文文档</a> 与 <a href="https://github.com/crawler-requests/echo-server/blob/main/README.md">English README</a>。
     </p>
   </div>

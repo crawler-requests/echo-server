@@ -164,19 +164,26 @@ Set `HTTP_PORT=23231` to move the plain listener, or `HTTP_PORT=0` to disable it
 
 ### Run with Docker
 
+A multi-arch image (`linux/amd64`, `linux/arm64`) is published to GitHub's registry on every
+release, so deploying is a pull:
+
 ```bash
-docker build -t echo-server .
 docker run -d --name echo-server \
   -p 23231:23231 -p 23232:23232 \
   -v echo-data:/data \
   -e ECHO_SERVER_ADMIN_USERNAME=admin \
   -e ECHO_SERVER_ADMIN_PASSWORD='change-me-please' \
-  echo-server
+  ghcr.io/crawler-requests/echo-server:latest
 ```
 
 The image is a small Alpine runtime with the same self-contained binary (CA roots and tzdata
 included); the SQLite database lives on the `/data` volume. Omit the `ECHO_SERVER_ADMIN_*`
-variables to use the first-run setup wizard at `/ui/` instead.
+variables to use the first-run setup wizard at `/ui/` instead. To build locally, use
+`docker build -t echo-server .` and substitute the image name above.
+
+The container runs as the unprivileged UID/GID `10001:10001`. A **named volume** (`-v echo-data:/data`,
+above) is created with the right ownership automatically; if you bind-mount a host directory instead, make
+it writable by that UID first (`mkdir -p /srv/echo-data && sudo chown 10001:10001 /srv/echo-data`).
 
 ### Behind a reverse proxy (subpath mounts work)
 

@@ -159,18 +159,23 @@ ClientHello/JA3/JA4。可用 `HTTP_PORT=23231` 修改明文端口，或 `HTTP_PO
 
 ### 使用 Docker 运行
 
+每次发布都会把多架构镜像（`linux/amd64`、`linux/arm64`）推到 GitHub 自带的镜像仓库，部署只需拉取：
+
 ```bash
-docker build -t echo-server .
 docker run -d --name echo-server \
   -p 23231:23231 -p 23232:23232 \
   -v echo-data:/data \
   -e ECHO_SERVER_ADMIN_USERNAME=admin \
   -e ECHO_SERVER_ADMIN_PASSWORD='change-me-please' \
-  echo-server
+  ghcr.io/crawler-requests/echo-server:latest
 ```
 
 镜像基于精简的 Alpine 运行时，内部是同一个自包含二进制（含 CA 根证书与 tzdata）；SQLite 数据库位于
-`/data` 卷。若不设置 `ECHO_SERVER_ADMIN_*`，可通过 `/ui/` 的首次初始化向导创建管理员。
+`/data` 卷。若不设置 `ECHO_SERVER_ADMIN_*`，可通过 `/ui/` 的首次初始化向导创建管理员。需要在本地构建时，
+用 `docker build -t echo-server .`，并把上面的镜像名换成本地标签。
+
+容器以非特权用户 `10001:10001` 运行。**命名卷**（上例的 `-v echo-data:/data`）会自动获得正确属主；
+如果改为绑定宿主机目录，请先让它对该 UID 可写：`mkdir -p /srv/echo-data && sudo chown 10001:10001 /srv/echo-data`。
 
 ### 挂在反向代理的子路径下
 
