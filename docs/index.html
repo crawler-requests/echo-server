@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>echo-server — TLS / HTTP2 指纹回显服务（单文件 Go 二进制）</title>
-<meta name="description" content="自托管的 HTTPS 回声服务：回显完整 TLS ClientHello 与 HTTP/2 指纹（JA3/JA4/JA4H），识别调用方客户端与 UA 伪造，附带 ASN/地理与连接类型判定。单个 Go 二进制，自带 React 控制台与 SQLite。">
+<title>echo-server — TLS / HTTP2 指纹回显服务（容器镜像 / 单文件二进制）</title>
+<meta name="description" content="自托管的 HTTPS 回声服务：回显完整 TLS ClientHello 与 HTTP/2 指纹（JA3/JA4/JA4H），识别调用方客户端与 UA 伪造，附带 ASN/地理与连接类型判定。一条 docker run 或一个 Go 二进制即可部署，自带 React 控制台与 SQLite。">
 <meta name="theme-color" content="#faf9f5">
 <meta property="og:type" content="website">
 <meta property="og:title" content="echo-server — TLS / HTTP2 指纹回显服务">
@@ -115,6 +115,12 @@ h2{font-size:clamp(24px,3vw,34px);font-weight:800;letter-spacing:-.4px;margin:10
 /* quickstart */
 .qs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}
 .qs .codecard{box-shadow:0 14px 34px -20px rgba(28,27,24,.4)}
+.codecard .bar .fname{margin-left:auto;font-family:var(--mono);font-size:11.5px;letter-spacing:.04em;color:#8a8279}
+.qs-notes{list-style:none;display:grid;gap:9px;margin:22px 0 0;padding:0}
+.qs-notes li{position:relative;padding-left:20px;color:var(--muted);font-size:13.5px}
+.qs-notes li::before{content:"→";position:absolute;left:0;top:0;color:var(--brand);font-weight:700}
+.qs-title{margin-top:46px;font-size:18px;font-weight:750}
+.qs-foot{margin-top:22px;color:var(--muted);font-size:13.5px}
 
 /* faq */
 .faq{display:grid;gap:10px}
@@ -192,7 +198,7 @@ footer{border-top:1px solid var(--line);padding:40px 0 56px;background:var(--bg-
 <header class="hero" id="top">
   <div class="wrap hero-grid">
     <div>
-      <span class="badge">单文件 Go 二进制 · 自带控制台 · MIT</span>
+      <span class="badge">单文件 Go 二进制 · 容器镜像 · 自带控制台 · MIT</span>
       <h1>看清每一个请求<br><span class="accent">到底是谁发出的</span></h1>
       <p class="lead">
         回显完整的 TLS ClientHello 与 HTTP/2 指纹（JA3 / JA4 / JA4_r / JA4_o / JA4H），
@@ -200,7 +206,8 @@ footer{border-top:1px solid var(--line);padding:40px 0 56px;background:var(--bg-
         为爬虫调试、代理池验收与指纹浏览器校验而生。
       </p>
       <div class="cta">
-        <a class="btn primary" href="https://github.com/crawler-requests/echo-server/releases/latest">获取最新版本 →</a>
+        <a class="btn primary" href="#quickstart">三步跑起来 →</a>
+        <a class="btn" href="https://github.com/crawler-requests/echo-server/releases/latest">下载 Release</a>
         <a class="btn" href="https://github.com/crawler-requests/echo-server">查看源码</a>
         <a class="btn" href="https://github.com/crawler-requests/echo-server/blob/main/README.zh-CN.md">中文文档</a>
       </div>
@@ -351,41 +358,125 @@ footer{border-top:1px solid var(--line);padding:40px 0 56px;background:var(--bg-
 <section id="quickstart" class="alt">
   <div class="wrap">
     <span class="eyebrow">Quick start</span>
-    <h2>三步跑起来</h2>
-    <p class="sub">下载单个二进制即可，无需 Node、无需反向代理、无需外部数据库。</p>
+    <h2>三步跑起来：容器或单文件</h2>
+    <p class="sub">
+      镜像已发布到 GitHub Container Registry（<code class="mono">linux/amd64</code> 与 <code class="mono">linux/arm64</code>），
+      自带控制台、CA 根证书与 <code class="mono">HEALTHCHECK</code>；不想用容器就下载单文件二进制。
+      下面默认控制台在 <code class="mono">:23231</code>、HTTPS 指纹端口在 <code class="mono">:23232</code>。
+    </p>
     <div class="qs">
-      <div class="codecard"><div class="bar"><i></i><i></i><i></i></div>
-<pre><span class="c"># 1. 下载并校验（以 Linux amd64 为例）</span>
-curl -LO https://github.com/crawler-requests/echo-server/releases/latest/download/checksums.txt
-curl -LO https://github.com/crawler-requests/echo-server/releases/latest/download/echo-server_&lt;ver&gt;_linux_amd64.tar.gz
+      <div class="codecard">
+        <div class="bar"><i></i><i></i><i></i><span class="fname">docker run</span></div>
+<pre><span class="c"># 1. 拉取并启动（发布版镜像）</span>
+docker run -d --name echo-server \
+  -p 23231:23231 -p 23232:23232 \
+  -v echo-data:/data \
+  -e ECHO_SERVER_ADMIN_USERNAME=admin \
+  -e ECHO_SERVER_ADMIN_PASSWORD=<span class="s">'换成你的密码'</span> \
+  --restart unless-stopped \
+  ghcr.io/crawler-requests/echo-server:latest</pre>
+      </div>
+      <div class="codecard">
+        <div class="bar"><i></i><i></i><i></i><span class="fname">verify</span></div>
+<pre><span class="c"># 2. 验收（全部应通过）</span>
+curl -s http://127.0.0.1:23231/health
+<span class="c"># {"status":"ok"}</span>
+
+curl -sk https://127.0.0.1:23232/echo \
+  | jq '.client, .client_hello.ja4'
+
+docker inspect --format \
+  '{{.State.Health.Status}}' echo-server
+<span class="c"># healthy（约启动 15 秒后）</span>
+
+<span class="c"># 3. 浏览器打开控制台完成初始化</span>
+http://127.0.0.1:23231/ui/</pre>
+      </div>
+    </div>
+
+    <div class="qs" style="margin-top:18px">
+      <div class="codecard">
+        <div class="bar"><i></i><i></i><i></i><span class="fname">variants</span></div>
+<pre><span class="c"># 只保留 HTTPS：控制台与 API 走 23232（自签证书）</span>
+docker run -d --name echo-server -p 23232:23232 \
+  -v echo-data:/data -e HTTP_PORT=0 \
+  -e ECHO_SERVER_ADMIN_PASSWORD=<span class="s">'换成你的密码'</span> \
+  ghcr.io/crawler-requests/echo-server:latest
+
+<span class="c"># Lite：无数据库、无控制台</span>
+<span class="c"># 只服务 /ip /echo /health /metrics</span>
+docker run -d --name echo-lite -p 23232:23232 \
+  -e ECHO_SERVER_LITE=1 \
+  ghcr.io/crawler-requests/echo-server:latest</pre>
+      </div>
+      <div class="codecard">
+        <div class="bar"><i></i><i></i><i></i><span class="fname">docker compose</span></div>
+<pre><span class="c"># compose.yaml</span>
+services:
+  echo-server:
+    image: ghcr.io/crawler-requests/echo-server:latest
+    ports: [<span class="s">"23231:23231"</span>, <span class="s">"23232:23232"</span>]
+    volumes: [<span class="s">"echo-data:/data"</span>]
+    environment:
+      ECHO_SERVER_ADMIN_USERNAME: admin
+      ECHO_SERVER_ADMIN_PASSWORD: <span class="s">change-me-please</span>
+    restart: unless-stopped
+volumes:
+  echo-data:
+
+<span class="c"># 启动 / 升级</span>
+docker compose up -d
+docker compose pull &amp;&amp; docker compose up -d</pre>
+      </div>
+    </div>
+
+    <ul class="qs-notes">
+      <li>镜像 tag 去掉 <code class="mono">v</code> 前缀：发布 <code class="mono">v1.0.3</code> 得到 <code class="mono">1.0.3</code>、<code class="mono">1.0</code>、<code class="mono">1</code> 与 <code class="mono">latest</code>；预发布只发布自身版本号，<code class="mono">latest</code> 停留在上一个正式版。</li>
+      <li>容器以非特权用户 <code class="mono">10001:10001</code> 运行。命名卷（<code class="mono">-v echo-data:/data</code>）会自动获得正确属主；改为绑定宿主机目录时，先 <code class="mono">sudo mkdir -p /srv/echo-data &amp;&amp; sudo chown 10001:10001 /srv/echo-data</code>，再挂载 <code class="mono">-v /srv/echo-data:/data</code>。</li>
+      <li>Podman 同样可用：把命令里的 <code class="mono">docker</code> 换成 <code class="mono">podman</code>，参数不变。</li>
+      <li>不设置 <code class="mono">ECHO_SERVER_ADMIN_*</code> 时，打开 <code class="mono">/ui/</code> 会走首次初始化向导创建管理员；<b>第一个创建成功的人拥有整个安装</b>，公网部署请务必先通过环境变量设好密码。</li>
+      <li>排查用 <code class="mono">docker logs -f echo-server</code>；SQLite 落在 <code class="mono">/data</code> 卷里，删除重建容器不会丢数据。</li>
+      <li>若 <code class="mono">docker pull</code> 报 <code class="mono">unauthorized</code> / <code class="mono">denied</code>，说明该 GHCR 包尚未设为 Public：用带 <code class="mono">read:packages</code> 的 PAT 执行 <code class="mono">echo $CR_PAT | docker login ghcr.io -u &lt;user&gt; --password-stdin</code>，或改用下方的二进制方式。</li>
+    </ul>
+
+    <h3 class="qs-title">不想用容器？单文件二进制同样三步</h3>
+    <p class="sub" style="margin:8px 0 18px">下载对应平台的压缩包即可，无需 Node、反向代理或外部数据库；控制台与镜像里是同一份代码。</p>
+    <div class="qs">
+      <div class="codecard">
+        <div class="bar"><i></i><i></i><i></i><span class="fname">binary</span></div>
+<pre><span class="c"># 1. 下载并校验（以 Linux amd64、&lt;ver&gt;=1.0.3 为例）</span>
+BASE=https://github.com/crawler-requests/echo-server/releases/latest/download
+curl -LO $BASE/checksums.txt
+curl -LO $BASE/echo-server_&lt;ver&gt;_linux_amd64.tar.gz
 sha256sum -c checksums.txt --ignore-missing
 tar xf echo-server_&lt;ver&gt;_linux_amd64.tar.gz
 
 <span class="c"># 2. 启动（HTTPS :23232 / 控制台 :23231）</span>
 ECHO_SERVER_DB=./echo.db \
 ECHO_SERVER_ADMIN_USERNAME=admin \
-ECHO_SERVER_ADMIN_PASSWORD=<span class="s">'替换成你的密码'</span> \
+ECHO_SERVER_ADMIN_PASSWORD=<span class="s">'换成你的密码'</span> \
 PORT=23232 HTTP_PORT=23231 ./echo-server</pre>
       </div>
-      <div class="codecard"><div class="bar"><i></i><i></i><i></i></div>
-<pre><span class="c"># 3. 验收（全部应通过）</span>
-curl -sf http://127.0.0.1:23231/health      <span class="c"># {"status":"ok"}</span>
-curl -sf http://127.0.0.1:23231/ip          <span class="c"># 你的出网 IP</span>
+      <div class="codecard">
+        <div class="bar"><i></i><i></i><i></i><span class="fname">verify</span></div>
+<pre><span class="c"># 3. 验收</span>
+curl -s http://127.0.0.1:23231/health
+curl -s http://127.0.0.1:23231/ip
 curl -sk https://127.0.0.1:23232/echo \
-  | jq '.client, .client_hello.ja4, .http2'
+  | jq '.client, .client_hello.ja4'
 
 <span class="c"># 控制台</span>
-open http://127.0.0.1:23231/ui/
+http://127.0.0.1:23231/ui/
 
 <span class="c"># Lite：无数据库、只服务 /ip 与 /echo</span>
 ECHO_SERVER_LITE=1 PORT=23232 HTTP_PORT=23231 ./echo-server</pre>
       </div>
     </div>
-    <p style="margin-top:22px;color:var(--muted);font-size:13.5px">
-      需要 docker？镜像已发布到 GitHub 的镜像仓库（amd64/arm64），直接拉取即可：
-      <code class="mono">docker run -d -p 23231:23231 -p 23232:23232 -v echo-data:/data -e ECHO_SERVER_ADMIN_PASSWORD='…' ghcr.io/crawler-requests/echo-server:latest</code>
-      （容器以非特权 UID 10001 运行；若改为绑定宿主机目录，请先 <code class="mono">chown 10001:10001</code> 该目录）。
-      详细参数见 <a href="https://github.com/crawler-requests/echo-server/blob/main/README.zh-CN.md">中文文档</a> 与 <a href="https://github.com/crawler-requests/echo-server/blob/main/README.md">English README</a>。
+
+    <p class="qs-foot">
+      完整参数见 <a href="https://github.com/crawler-requests/echo-server/blob/main/README.zh-CN.md">中文文档</a> 与
+      <a href="https://github.com/crawler-requests/echo-server/blob/main/README.md">English README</a>；
+      镜像 tag 与架构见 <a href="https://github.com/crawler-requests/echo-server/pkgs/container/echo-server">GHCR 包页面</a>。
     </p>
   </div>
 </section>
