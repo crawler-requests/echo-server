@@ -16,8 +16,8 @@ import (
 // and trying HTTPS first (the always-on listener) with a plain-HTTP fallback,
 // keeps the probe honest for every layout the server supports.
 //
-// The certificate is self-signed, but the probe only talks to loopback, where
-// mcpTLSConfig (see the note there) already skips verification.
+// The certificate is self-signed, but the probe only talks to loopback, and
+// probeReachable (see mcp.go) skips verification for those dials.
 func runHealthcheck() {
 	os.Exit(healthcheckExitCode())
 }
