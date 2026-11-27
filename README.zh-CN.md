@@ -159,7 +159,9 @@ ClientHello/JA3/JA4。可用 `HTTP_PORT=23231` 修改明文端口，或 `HTTP_PO
 
 ### 使用 Docker 运行
 
-每次发布都会把多架构镜像（`linux/amd64`、`linux/arm64`）推到 GitHub 自带的镜像仓库，部署只需拉取：
+每次发布都会把多架构镜像（`linux/amd64`、`linux/arm64`）推到 GitHub 自带的镜像仓库，部署只需拉取。
+镜像 tag 会去掉 `v` 前缀：发布 `v1.0.3` 时镜像为 `1.0.3`、`1.0`、`1` 和 `latest`。预发布 tag
+（如 `v1.1.0-rc1`）只发布它自己的版本号，`latest` 继续指向上一个正式版本，直到正式版发布。
 
 ```bash
 docker run -d --name echo-server \
@@ -176,6 +178,23 @@ docker run -d --name echo-server \
 
 容器以非特权用户 `10001:10001` 运行。**命名卷**（上例的 `-v echo-data:/data`）会自动获得正确属主；
 如果改为绑定宿主机目录，请先让它对该 UID 可写：`mkdir -p /srv/echo-data && sudo chown 10001:10001 /srv/echo-data`。
+
+镜像自带 `HEALTHCHECK`，在容器内执行 `echo-server healthcheck`。它读取与服务端同一套 `PORT`/`HTTP_PORT`
+环境变量并优先探测 HTTPS，因此无论默认端口、改过明文端口（`-e HTTP_PORT=8080`），还是关闭明文监听，
+结论都正确——`HTTP_PORT=0`（下面的纯 HTTPS 布局）下容器依然是 `healthy`。用
+`docker inspect --format '{{.State.Health.Status}}' echo-server` 查看状态。
+
+只跑 HTTPS（只映射 `23232`，控制台改由 HTTPS 监听提供）：
+
+```bash
+docker run -d --name echo-server -p 23232:23232 -v echo-data:/data \
+  -e HTTP_PORT=0 -e ECHO_SERVER_ADMIN_USERNAME=admin \
+  -e ECHO_SERVER_ADMIN_PASSWORD='change-me-please' \
+  ghcr.io/crawler-requests/echo-server:latest
+```
+
+同一个镜像也能以极速模式运行（`-e ECHO_SERVER_LITE=1`）：只提供 `/ip` 与 `/echo`，无数据库、无控制台、
+不向卷写入任何内容；该模式下 `/ui/` 与 `/api/config` 按设计返回 404。
 
 ### 挂在反向代理的子路径下
 
@@ -905,6 +924,7 @@ make build               # 前端 + go build（通过 -ldflags 注入版本/提�
 make test                # go test ./... -race -count=1
 make lint                # 如有 Go 文件未 gofmt 则失败
 make docker              # 容器镜像
+make docker-smoke        # 容器镜像 + 端到端运行（控制台、版本、健康检查）
 make snapshot            # 本地交叉编译所有发布目标（goreleaser build --snapshot）
 make release-snapshot    # 本地生成 dist/ 压缩包 + 校验和（不发布）
 ```

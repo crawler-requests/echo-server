@@ -142,6 +142,14 @@ func main() {
 		return
 	}
 
+	// Container health probe (see healthcheck.go): exit 0 when this deployment
+	// answers /health, 1 otherwise. It runs before any listener binds, so the
+	// probe inside the container can never start a second server or a database.
+	if hasHealthcheckFlag(os.Args[1:]) {
+		runHealthcheck()
+		return
+	}
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = defaultHTTPSPort

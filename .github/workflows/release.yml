@@ -5,8 +5,16 @@ on:
     tags:
       - "v*"
   # Manual run: executes the same build/test pipeline and GoReleaser in
-  # snapshot mode, without publishing anything.
+  # snapshot mode, without publishing a Release. `build_image: true` additionally
+  # runs the whole container job (multi-arch build, push to GHCR, then the
+  # post-push verification) under a throwaway `ci-<sha>` tag, so the image
+  # pipeline can be exercised without cutting a Release.
   workflow_dispatch:
+    inputs:
+      build_image:
+        description: "Also build and push a throwaway ci-<sha> image to GHCR"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -100,10 +108,18 @@ jobs:
   # repositories and the job authenticates with the default GITHUB_TOKEN.
   # amd64 and arm64 are both built, because the target hosts (servers and
   # Apple-silicon laptops) differ.
+  #
+  # Publishing is not the same as being deployable: a successful push says
+  # nothing about whether `docker run` works, and GHCR creates the package
+  # PRIVATE no matter what the repository's visibility is. Both are checked
+  # after the push, so a release that nobody can deploy fails here instead of
+  # failing in the operator's terminal.
   image:
     name: Publish container image (GHCR)
     needs: goreleaser
-    if: startsWith(github.ref, 'refs/tags/v')
+    # A tag always publishes. A manual run only does so when asked, and then
+    # under the throwaway tag resolved below (no Release, never `latest`).
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.build_image
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -126,20 +142,47 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # A manual run must not touch the image an operator pulls: it builds into
+      # a separate `<repo>-ci` package under the throwaway tag `ci-<sha>`, so
+      # `latest`/`1.2.3` on the real package are never written by a test run.
+      - name: Resolve image repository
+        id: image
+        run: |
+          set -euo pipefail
+          repo="ghcr.io/${{ github.repository }}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "repo=${repo}-ci" >> "$GITHUB_OUTPUT"
+            echo "description=Manual CI build of echo-server" >> "$GITHUB_OUTPUT"
+          else
+            echo "repo=$repo" >> "$GITHUB_OUTPUT"
+            echo "description=${{ github.event.repository.description }}" >> "$GITHUB_OUTPUT"
+          fi
+
       # Tags: the exact release (v1.2.3), the minor line (1.2) and `latest`,
       # plus a version-free tag for people who pin by major (1).
+      #
+      # `{{version}}` from docker/metadata-action strips the leading "v", so the
+      # image tag reads 1.2.3 while the release tag reads v1.2.3 — matching the
+      # version the binary reports on /api/system.
+      #
+      # A prerelease tag (v1.3.0-rc1, as GoReleaser marks those) publishes
+      # 1.3.0-rc1 only: `latest`, `1.3` and `1` must keep pointing at the last
+      # stable release, or a pre-release silently becomes what an operator's
+      # `docker pull …:latest` returns.
       - name: Image metadata
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ghcr.io/${{ github.repository }}
+          images: ${{ steps.image.outputs.repo }}
           tags: |
             type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=raw,value=latest
+            type=semver,pattern={{major}}.{{minor}},enable=${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-') }}
+            type=semver,pattern={{major}},enable=${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-') }}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-') }}
+            type=raw,value=ci-${{ github.sha }},enable=${{ inputs.build_image }}
 
       - name: Build and push
+        id: push
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -148,8 +191,106 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            VERSION=${{ github.ref_name }}
+            VERSION=${{ github.event_name == 'workflow_dispatch' && format('ci-{0}', github.sha) || steps.meta.outputs.version }}
             COMMIT=${{ github.sha }}
             BUILD_DATE=${{ steps.buildmeta.outputs.date }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # A push only proves the registry accepted bytes. Pull the published
+      # multi-arch manifest back, start the amd64 image exactly as the README
+      # tells an operator to, and prove the service answers — with the tag's
+      # version baked in, so an image built from the wrong commit is caught.
+      - name: Verify the published image runs
+        run: |
+          set -euo pipefail
+          REPO="${{ steps.image.outputs.repo }}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            IMAGE="${REPO}:ci-${{ github.sha }}"
+            EXPECT_VERSION="ci-${{ github.sha }}"
+          else
+            IMAGE="${REPO}:${{ steps.meta.outputs.version }}"
+            EXPECT_VERSION="${{ steps.meta.outputs.version }}"
+          fi
+          echo "verifying $IMAGE (expected version '$EXPECT_VERSION')"
+          docker pull "$IMAGE"
+
+          # Both architectures must be present in the manifest list, and both
+          # entries must be Linux (the image is linux-only).
+          echo "platforms: $(docker buildx imagetools inspect "$IMAGE" \
+            --format '{{range .Manifest.Manifests}}{{.Platform.OS}}/{{.Platform.Architecture}} {{end}}')"
+          docker buildx imagetools inspect "$IMAGE" \
+            --format '{{range .Manifest.Manifests}}{{.Platform.OS}}/{{.Platform.Architecture}} {{end}}' \
+            | tr ' ' '\n' | grep -qx 'linux/amd64'
+          docker buildx imagetools inspect "$IMAGE" \
+            --format '{{range .Manifest.Manifests}}{{.Platform.OS}}/{{.Platform.Architecture}} {{end}}' \
+            | tr ' ' '\n' | grep -qx 'linux/arm64'
+          test "$(docker image inspect "$IMAGE" --format '{{.Architecture}}')" = "amd64"
+
+          # Random host ports: a fixed pair collides with anything else on the
+          # runner, and a collision would fail a healthy image.
+          docker run -d --name echo-release -p 127.0.0.1::23231 -p 127.0.0.1::23232 \
+            -e ECHO_SERVER_ADMIN_USERNAME=release \
+            -e ECHO_SERVER_ADMIN_PASSWORD='release-check-123' \
+            "$IMAGE"
+          trap 'docker logs echo-release; docker rm -f echo-release' EXIT
+          HTTP=$(docker port echo-release 23231/tcp | awk -F: '{print $NF}')
+          HTTPS=$(docker port echo-release 23232/tcp | awk -F: '{print $NF}')
+
+          for i in $(seq 1 30); do
+            curl -fsS "http://127.0.0.1:$HTTP/health" >/dev/null 2>&1 && break
+            sleep 1
+          done
+          test "$(curl -fsS "http://127.0.0.1:$HTTP/health")" = '{"status":"ok"}'
+          curl -fsS "http://127.0.0.1:$HTTP/ui/" | grep -q 'id="root"'
+          curl -fsS "http://127.0.0.1:$HTTP/ip" | grep -q '"ip"'
+          curl -fsS -k "https://127.0.0.1:$HTTPS/echo?fields=client_hello.ja4" | grep -q '"ja4"'
+
+          TOKEN=$(curl -fsS -X POST "http://127.0.0.1:$HTTP/api/login" \
+            -H 'Content-Type: application/json' \
+            -d '{"username":"release","password":"release-check-123"}' \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
+          curl -fsS "http://127.0.0.1:$HTTP/api/system" -H "Authorization: Bearer $TOKEN" \
+            | python3 -c "import json,sys; d=json.load(sys.stdin); \
+                          assert d['version']=='${EXPECT_VERSION}', d; \
+                          assert d['build_commit']=='${{ github.sha }}', d"
+
+          # The baked probe must agree with the running container.
+          docker exec echo-release echo-server healthcheck
+          docker image inspect "$IMAGE" --format '{{json .Config.Healthcheck.Test}}' | grep -q 'echo-server healthcheck'
+
+      # Anonymous pull is the contract the README and the site promise. GHCR
+      # does not inherit the repository's visibility: the first publish creates
+      # the package private, and an anonymous token request is then refused
+      # (or, before the package exists, 401). Failing here keeps a
+      # publish-but-undeployable release from shipping silently.
+      #
+      # Only a real release gate is meaningful here. A manual run publishes a
+      # throwaway `<repo>-ci` package that is not meant to be public, so it
+      # skips this step rather than failing on a package nobody deploys.
+      - name: Anonymous pull must work (package is public)
+        if: ${{ !inputs.build_image }}
+        run: |
+          set -euo pipefail
+          REPO="${{ steps.image.outputs.repo }}"
+          TAG="${{ steps.meta.outputs.version }}"
+          short="${REPO#ghcr.io/}"
+          code=$(curl -s -o /tmp/ghcr-token.json -w '%{http_code}' \
+            "https://ghcr.io/token?scope=repository:${short}:pull&service=ghcr.io")
+          if [ "$code" != "200" ]; then
+            echo "::error::GHCR refused an anonymous token request for ${REPO} (HTTP $code)."
+            echo "The package is not public. Set it once:"
+            echo "  Org → Packages → ${short##*/} → Package settings → Danger Zone → Change visibility → Public"
+            echo "  (or Org → Settings → Packages → Package Creation → Public)"
+            exit 1
+          fi
+          TOKEN=$(python3 -c 'import json;print(json.load(open("/tmp/ghcr-token.json"))["token"])')
+          curl -fsS -o /dev/null \
+            -H "Authorization: Bearer $TOKEN" \
+            -H 'Accept: application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json' \
+            "https://ghcr.io/v2/${short}/manifests/${TAG}"
+          # Belt and braces: an unauthenticated docker pull, as a fresh host
+          # would do it.
+          docker logout ghcr.io
+          docker pull "${REPO}:${TAG}"
+

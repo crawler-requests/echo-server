@@ -41,20 +41,27 @@ is designed so a release is a repeatable 15-minute operation.
    - `sha256sum -c checksums.txt` inside the release download directory.
    - **Lite release**: download `echo-server-lite_*`, run it with `ECHO_SERVER_LITE=1`, confirm
      `/ip` answers, `/ui/` and `/api/config` are 404, and no `echo.db` appears next to the binary.
-   - **Container image** — the `image` job pushes to GHCR with the tag as `v1.2.3`, `1.2`, `1` and
-     `latest`:
+   - **Container image** — the `image` job pushes to GHCR. Tag `v1.2.3` publishes the image as
+     `1.2.3`, `1.2`, `1` and `latest` — the leading `v` is dropped, exactly as the binary reports
+     it on `/api/system`. Deploying is the smoke test:
      ```bash
-     docker pull ghcr.io/crawler-requests/echo-server:v1.0.0
+     docker pull ghcr.io/crawler-requests/echo-server:1.0.0
      docker run -d -p 23231:23231 -e ECHO_SERVER_ADMIN_PASSWORD=x \
-       ghcr.io/crawler-requests/echo-server:v1.0.0
+       ghcr.io/crawler-requests/echo-server:1.0.0
      curl -sf http://127.0.0.1:23231/health
-     docker image inspect ghcr.io/crawler-requests/echo-server:v1.0.0 --format '{{.Architecture}}'
+     docker image inspect ghcr.io/crawler-requests/echo-server:1.0.0 --format '{{.Architecture}}'
      ```
+     The workflow now verifies this itself, so step 5 only needs a glance at the run: after the
+     push, the `image` job pulls the published manifest, starts the container, checks `/health`,
+     `/ui/`, `/ip`, the HTTPS `/echo` JA4, `/api/system` version **and** that an anonymous
+     `docker pull` succeeds. A release that cannot be pulled by a stranger fails the job.
      The package must be **public** for anonymous pulls, and GHCR does **not** inherit the
      repository's visibility — the first publish creates it private, so a bare `docker pull` fails
      with `denied` / `unauthorized` even though the push succeeded. Set it once:
      *Org → Packages → echo-server → Package settings → Danger Zone → Change visibility → Public*.
      If the pull succeeds without credentials afterwards, it stays that way for all later releases.
+     (Org → Settings → Packages → Package Creation → Public makes every future package public and
+     removes this manual step from every new project.)
 6. **Post-release**
    - Announce in the project README/discussions if applicable.
    - Bump `serverVersion`'s development default only if the project starts cutting maintenance

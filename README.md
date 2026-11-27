@@ -165,7 +165,9 @@ Set `HTTP_PORT=23231` to move the plain listener, or `HTTP_PORT=0` to disable it
 ### Run with Docker
 
 A multi-arch image (`linux/amd64`, `linux/arm64`) is published to GitHub's registry on every
-release, so deploying is a pull:
+release, so deploying is a pull. Tags drop the leading `v`: the release `v1.0.3` publishes the
+image as `1.0.3`, `1.0`, `1` and `latest`. A prerelease tag (`v1.1.0-rc1`) publishes only its own
+version — `latest` keeps pointing at the last stable release until a stable one ships.
 
 ```bash
 docker run -d --name echo-server \
@@ -184,6 +186,26 @@ variables to use the first-run setup wizard at `/ui/` instead. To build locally,
 The container runs as the unprivileged UID/GID `10001:10001`. A **named volume** (`-v echo-data:/data`,
 above) is created with the right ownership automatically; if you bind-mount a host directory instead, make
 it writable by that UID first (`mkdir -p /srv/echo-data && sudo chown 10001:10001 /srv/echo-data`).
+
+The image carries a `HEALTHCHECK` that runs `echo-server healthcheck` inside the container. It reads
+`PORT`/`HTTP_PORT` from the same environment the server does and tries HTTPS first, so it stays
+correct with the defaults, with a moved plain port (`-e HTTP_PORT=8080`), and with the plain
+listener disabled — `HTTP_PORT=0` is the HTTPS-only, console-free layout below, and the container
+still reports `healthy` there. `docker inspect --format '{{.State.Health.Status}}' echo-server`
+shows the result.
+
+To run HTTPS-only (bind `23232` only; the console then shares the HTTPS listener):
+
+```bash
+docker run -d --name echo-server -p 23232:23232 -v echo-data:/data \
+  -e HTTP_PORT=0 -e ECHO_SERVER_ADMIN_USERNAME=admin \
+  -e ECHO_SERVER_ADMIN_PASSWORD='change-me-please' \
+  ghcr.io/crawler-requests/echo-server:latest
+```
+
+The same image also runs in lite mode (`-e ECHO_SERVER_LITE=1`): `/ip` and `/echo` only, no
+database, no console, nothing written to the volume. In that mode `/ui/` and `/api/config` answer
+404 by design.
 
 ### Behind a reverse proxy (subpath mounts work)
 
@@ -951,6 +973,7 @@ make build               # frontend + go build (version/commit/date injected via
 make test                # go test ./... -race -count=1
 make lint                # fail if a Go file is not gofmt-formatted
 make docker              # container image
+make docker-smoke        # container image + end-to-end run (console, version, health probe)
 make snapshot            # cross-compile all release targets locally (goreleaser build --snapshot)
 make release-snapshot    # local archives + checksums in dist/ (no publish)
 ```

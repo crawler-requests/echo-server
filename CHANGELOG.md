@@ -6,6 +6,45 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.0.4] - 2026-11-27
+
+### Fixed
+
+- **A containerised deployment in HTTPS-only or moved-port layouts reported `unhealthy` forever.**
+  The image's `HEALTHCHECK` was `wget http://127.0.0.1:23231/health`, so with `HTTP_PORT=0` (the
+  documented way to run without the plain listener, and the layout the README's HTTPS-only example
+  uses) the probe dialled a closed port and Docker marked the container unhealthy on every check;
+  with `-e HTTP_PORT=8080` it dialled the wrong port. The binary now answers
+  `echo-server healthcheck`, which reads the same `PORT`/`HTTP_PORT` environment the server does,
+  tries the always-on HTTPS listener first and falls back to plain HTTP. Verified in all four
+  layouts — defaults, `HTTP_PORT=0`, `HTTP_PORT=8080` and lite mode — each reporting `healthy`.
+- **Container image tags now match the version the binary reports.** `docker/metadata-action`'s
+  `{{version}}` strips the tag's leading `v`, so release `v1.0.3` publishes the image as `1.0.3`
+  (not `v1.0.3`), while the Dockerfile was built with `github.ref_name` (`v1.0.3`), leaving
+  `/api/system` disagreeing with the image tag. The build now passes the same `{{version}}` the
+  tags use. RELEASING.md's `docker pull …:v1.0.0` example was wrong for the same reason and now
+  shows `1.0.0`.
+- **A prerelease tag no longer overwrites `latest`.** `v1.3.0-rc1` used to publish `1.3`, `1` and
+  `latest`, silently redirecting every `docker pull …:latest` from the last stable release to a
+  release candidate. A prerelease now publishes only its own version tag.
+
+### Added
+
+- **The release job verifies the published image instead of trusting the push.** After the image
+  is on GHCR it pulls the multi-arch manifest back, asserts `linux/amd64` and `linux/arm64` are
+  present, starts the amd64 image the way the README tells an operator to, and checks `/health`,
+  `/ui/`, `/ip`, the HTTPS `/echo` JA4, the `/api/system` version and commit, and that the baked
+  `echo-server healthcheck` agrees with the running container. A release that pushes but cannot run
+  now fails the job.
+- **The release fails if the GHCR package is not publicly pullable.** GHCR creates the package
+  private on the first publish no matter what the repository's visibility is, so a "successful"
+  release could still leave `docker pull` answering `unauthorized` for every operator. The job
+  requests an anonymous token and performs an unauthenticated `docker pull`; if either is refused
+  it fails with the exact UI path to flip the package to Public.
+- `make docker-smoke` runs the image end to end locally (console, `/ip`, version injection, and
+  the health probe with the defaults, `HTTP_PORT=0` and a moved plain port), which mirrors what CI's
+  Docker job enforces.
+
 ## [1.0.3] - 2026-11-24
 
 ### Added
@@ -203,7 +242,8 @@ First public release. One self-contained Go binary with the React console embedd
 - **Build & release** — `Makefile`, `//go:embed` single binary, GoReleaser (6 platform targets,
   archives, checksums), GitHub Actions CI and tag-triggered releases, Dockerfile.
 
-[Unreleased]: https://github.com/crawler-requests/echo-server/compare/v1.0.3...HEAD
+[Unreleased]: https://github.com/crawler-requests/echo-server/compare/v1.0.4...HEAD
+[1.0.4]: https://github.com/crawler-requests/echo-server/releases/tag/v1.0.4
 [1.0.3]: https://github.com/crawler-requests/echo-server/releases/tag/v1.0.3
 [0.0.1]: https://github.com/crawler-requests/echo-server/releases/tag/v0.0.1
 [1.0.0]: https://github.com/crawler-requests/echo-server/releases/tag/v1.0.0
