@@ -27,6 +27,11 @@ All notable changes to this project are documented here. The format follows
 - **A prerelease tag no longer overwrites `latest`.** `v1.3.0-rc1` used to publish `1.3`, `1` and
   `latest`, silently redirecting every `docker pull …:latest` from the last stable release to a
   release candidate. A prerelease now publishes only its own version tag.
+- **A tag release could not publish its container image.** The `ci-<sha>` tag entry was gated with
+  `enable=${{ inputs.build_image }}`; `inputs` is empty on a tag push, so the value rendered as an
+  empty string and `docker/metadata-action` failed the job with "Invalid value for enable
+  attribute". The gate now compares the event name first, so a tag release publishes its image
+  exactly as intended.
 
 ### Added
 
