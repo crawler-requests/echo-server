@@ -838,14 +838,14 @@ const FP = {
     name:"Chromium 148", family:"browser", conf:0.90, spoofed:false,
     ja4:"t13i1515h2_8daaf6152771_d8a2da3f94cd",
     ja3:"771,51914-4865-4866-…,19018-16-51-…", ciphers:16, exts:17,
-    h2:"SETTINGS 顺序与 curl 不同（浏览器先声明 ALPN 与扩展）",
+    h2:"1:65536,2:0,4:6291456,6:262144|1:255:1|:method,:authority,:scheme,:path",
     note:"BoringSSL 握手 + 浏览器 UA，两者吻合。"
   },
   spoof: {
     name:"OpenSSL HTTP client", family:"http_client", conf:0.62, spoofed:true,
     ja4:"t13i3111h1_e8f1e7e78f70_b26ce05bbdd6",
     ja3:"771,4866-4867-4865-…,11-10-16-…", ciphers:31, exts:11,
-    h2:"与 curl 同族的握手；UA 却声称 Chrome 148",
+    h2:"3:100,4:10485760,2:0|:method,:scheme,:authority,:path",
     note:"TLS 指纹指向 OpenSSL HTTP client，UA 声称 Chrome —— UA 极可能伪造。"
   }
 };
