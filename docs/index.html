@@ -111,6 +111,16 @@ h2{font-size:clamp(24px,3vw,34px);font-weight:800;letter-spacing:-.4px;margin:10
 .table td.n{font-family:var(--mono);text-align:right}
 .table-wrap{overflow-x:auto;border-radius:14px}
 .good{color:var(--green);font-weight:700}
+/* On a phone the throughput table has five columns and no room for them: shrink
+   the type, drop cell padding and let the header wrap, rather than clipping the
+   CPU column off the card. */
+@media (max-width:600px){
+  .table{font-size:11.5px}
+  .table th,.table td{padding:9px 8px}
+  .table th{font-size:10px;letter-spacing:.02em}
+  .table th,.table td{white-space:nowrap}
+  .table td:first-child,.table th:first-child{white-space:normal}
+}
 
 /* quickstart */
 .qs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}
@@ -168,8 +178,174 @@ footer{border-top:1px solid var(--line);padding:40px 0 56px;background:var(--bg-
 }
 @media (prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
 </style>
+
+<style>
+/* ==========================================================================
+   Visual layer: diagrams, live demos, charts.
+   Everything is inline SVG / CSS so the page stays one self-contained file
+   with no CDN, and every number shown here was taken from a live instance.
+   ========================================================================== */
+.viz-root{
+  /* categorical slots 1..3 — validated (all-pairs, light+dark) by the
+     dataviz palette checker on surfaces #fdfbf6 / #1c1b18 */
+  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a;
+  --viz-surface:#fdfbf6; --viz-ink:#141413; --viz-ink-2:#52514e;
+  --viz-grid:#e6e1d6; --viz-band:#f6f2e9;
+  color-scheme:light;
+}
+/* The page itself is light-only (it has no dark theme), so the viz tokens are
+   pinned to the light surface too: a half-dark chart on a light panel is worse
+   than no dark mode. Both were validated against #fdfbf6 by the palette checker;
+   the dark steps (#3987e5/#d95926/#199e70) are recorded here for the day the page
+   grows a real dark theme.
+   @media (prefers-color-scheme:dark) would need --panel/--ink/--line to flip
+   with them, otherwise the card stays light while the marks go dark. */
+
+/* ---------- animated handshake ---------- */
+.hs{border:1px solid var(--line);border-radius:var(--radius);background:var(--panel);overflow:hidden}
+.hs-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:14px 18px;border-bottom:1px solid var(--line);background:var(--panel-2)}
+.hs-head h3{font-size:15px;font-weight:750;margin:0}
+.hs-head .legend{margin-left:auto;display:flex;gap:14px;font-size:12px;color:var(--muted)}
+.hs-head .legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:1px}
+.hs-body{position:relative;padding:4px 0}
+.hs-wrap{padding:0 18px}
+.hs-actors{display:flex;justify-content:space-between;gap:12px;padding:8px 2px 10px;font-size:12px;color:var(--muted)}
+.hs-actors b{display:block;font-size:12.5px;color:var(--ink)}
+.hs-track{position:relative;display:grid;gap:8px;padding:0 0 4px}
+.hs-stage{position:relative;display:grid;grid-template-columns:26px minmax(0,1fr);align-items:center;gap:12px;padding:11px 14px;border-radius:12px;border:1px dashed var(--line);background:var(--bg-2);opacity:.5;transition:opacity .3s,border-color .3s,background .3s}
+.hs-stage.on{opacity:1;border-style:solid}
+.hs-stage.s1.on{background:#fbeee6;border-color:#f0d7c8}
+.hs-stage.s2.on{background:#fdf1e8;border-color:#f5ddca}
+.hs-stage.s3.on{background:#eaf5ef;border-color:#cde3d6}
+.hs-stage.s4.on{background:#eaf1f8;border-color:#d3e0ec}
+.hs-stage .orow{display:grid;place-items:center;width:24px;height:24px;border-radius:50%;position:relative;font-size:11px;color:var(--muted);background:var(--panel);border:1px solid var(--line)}
+.hs-stage.on .orow{background:var(--panel);border-color:transparent;box-shadow:0 0 0 1px var(--line)}
+.hs-stage .hst b{display:block;font-size:13.5px;color:var(--ink)}
+.hs-stage .hst span{font-family:var(--mono);font-size:11px;color:var(--muted);word-break:break-word}
+.hs-stage .flow{position:absolute;right:10px;top:50%;width:34px;height:3px;border-radius:2px;background:currentColor;transform:translateY(-50%) scaleX(0);transform-origin:left;opacity:0;transition:transform .9s ease-out,opacity .25s}
+.hs-stage .flow.back{transform-origin:right;right:auto;left:10px}
+.hs-stage.on .flow{transform:translateY(-50%) scaleX(1);opacity:.85}
+.hs-stage .flow::after{content:"";position:absolute;right:-1px;top:-4px;border-left:7px solid currentColor;border-top:5px solid transparent;border-bottom:5px solid transparent}
+.hs-stage .flow.back::after{right:auto;left:-1px;border-left:0;border-right:7px solid currentColor}
+.hs-stage .flow{color:var(--brand)}
+.hs-stage.s2 .flow{color:#c9884a}
+.hs-stage.s3 .flow{color:var(--green)}
+.hs-stage.s4 .flow{color:var(--sky)}
+.hs-foot{display:flex;align-items:center;gap:12px;padding:12px 18px;border-top:1px solid var(--line);background:var(--panel-2)}
+.hs-foot .progress{flex:1;height:4px;border-radius:2px;background:var(--line);overflow:hidden}
+.hs-foot .progress i{display:block;height:100%;width:0;background:var(--brand);border-radius:2px}
+.hs-foot .stage{font-size:12.5px;color:var(--muted);min-width:240px}
+.hs-foot button{font:inherit;font-size:12.5px;font-weight:600;padding:6px 12px;border-radius:9px;border:1px solid var(--line);background:var(--panel);color:var(--ink);cursor:pointer}
+.hs-foot button:hover{border-color:#d8d1c4}
+.hs-foot button[aria-pressed="true"]{background:var(--brand-soft);border-color:#f0d7c8;color:var(--brand)}
+
+/* ---------- live demo ---------- */
+.demo{display:grid;grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr);gap:0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--panel)}
+.demo .pick{padding:20px;border-right:1px solid var(--line);display:grid;gap:10px;align-content:start}
+.demo .pick h3{margin:0 0 2px}
+.demo .pick p{margin:0 0 8px;font-size:13px;color:var(--muted)}
+.choice{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:10px;width:100%;text-align:left;padding:11px 13px;border-radius:12px;border:1px solid var(--line);background:var(--panel);cursor:pointer;font:inherit;color:var(--ink);transition:.15s}
+.choice:hover{border-color:#d8d1c4;transform:translateX(2px)}
+.choice[aria-checked="true"]{border-color:var(--brand);box-shadow:0 0 0 2px var(--brand-soft)}
+.choice .dot{width:9px;height:9px;border-radius:50%;background:var(--s1)}
+.choice .nm{font-weight:650;font-size:13.5px}
+.choice .meta{font-family:var(--mono);font-size:11px;color:var(--muted)}
+.demo .out{padding:20px;display:grid;gap:14px;align-content:start;background:var(--panel)}
+.verdict{border-radius:12px;padding:14px 16px;border:1px solid var(--line);background:var(--panel-2)}
+.verdict .badge2{display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:700;padding:3px 9px;border-radius:999px}
+.verdict .badge2.ok{background:#e8f3ec;color:#2f6b48;border:1px solid #cde3d6}
+.verdict .badge2.bad{background:#fbeae7;color:#a23f2d;border:1px solid #f2d2cb}
+.verdict h4{margin:10px 0 4px;font-size:16px}
+.verdict p{margin:0;font-size:13px;color:var(--muted)}
+.verdict .why{margin-top:9px;font-family:var(--mono);font-size:11.5px;color:var(--viz-ink-2);word-break:break-all}
+.fprows{display:grid;gap:8px}
+.fprow{display:grid;grid-template-columns:78px 1fr;gap:10px;align-items:center;font-size:12.5px}
+.fprow .kname{color:var(--muted)}
+.fprow .bar{position:relative;height:26px;border-radius:6px;background:var(--viz-band);overflow:hidden}
+.fprow .bar i{position:absolute;inset:0 auto 0 0;border-radius:6px;transform-origin:left;transform:scaleX(0);transition:transform .5s cubic-bezier(.2,.8,.2,1)}
+.fprow .bar b{position:absolute;left:9px;top:0;line-height:26px;font-family:var(--mono);font-size:11px;color:#12130f;mix-blend-mode:multiply}
+@media (max-width:900px){.demo{grid-template-columns:1fr}.demo .pick{border-right:0;border-bottom:1px solid var(--line)}}
+
+/* ---------- bar chart (throughput) ---------- */
+.chart{border:1px solid var(--line);border-radius:var(--radius);background:var(--panel);padding:20px 22px}
+.chart h3{margin:0 0 2px;font-size:15.5px}
+.chart .cap{margin:0 0 16px;font-size:12.5px;color:var(--muted)}
+.chart svg{display:block;width:100%;height:auto;overflow:visible}
+.chart svg text{font-family:var(--mono);font-size:11px;fill:var(--viz-ink-2)}
+.chart svg .gridline{stroke:var(--viz-grid);stroke-width:1}
+.chart svg .barbg{fill:var(--viz-band)}
+.chart svg .barfill{fill:var(--s1)}
+.chart svg .barfill.peak{fill:var(--s2)}
+.chart svg .val{fill:var(--viz-ink);font-weight:700;font-size:11.5px}
+.chart .tip{position:absolute;pointer-events:none;opacity:0;transition:opacity .12s;background:var(--dark);color:var(--dark-text);font-size:12px;padding:7px 10px;border-radius:8px;white-space:nowrap;z-index:10;border:1px solid var(--dark-line)}
+.chart{position:relative}
+.bars{display:grid;grid-template-columns:auto minmax(0,1fr);gap:10px;margin-top:6px}
+.yaxis{display:flex;flex-direction:column;justify-content:space-between;padding:22px 0 26px;font-family:var(--mono);font-size:11px;color:var(--viz-ink-2);text-align:right}
+.plot{position:relative;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;padding:22px 0 0}
+/* Gridlines live behind the bars: drawn on a layer spanning exactly the
+   plotting band (top 22px for the value caption, bottom 26px for the x label),
+   so a bar is never sliced by a line, and every line meets its y-axis tick. */
+.plot .gridlayer{position:absolute;left:0;right:0;top:22px;bottom:26px;z-index:0;pointer-events:none;
+  background-image:linear-gradient(to bottom,var(--viz-grid) 1px,transparent 1px);
+  background-size:100% 33.333%;
+  background-position:0 0,0 100%;
+  border-bottom:1px solid var(--viz-grid)}
+.col{display:flex;flex-direction:column;justify-content:flex-end;height:220px;padding-bottom:26px;position:relative;z-index:1}
+/* The stack is the measuring box: seg heights are percentages OF IT, so it
+   must have a definite height (flex-grow alone leaves it auto and the bars
+   collapse). 194px = 220px column minus the 26px x-label strip. */
+.col .stack{display:flex;flex-direction:column;justify-content:flex-end;flex:0 0 194px;height:194px;gap:2px}
+.col .cap{position:absolute;left:0;right:0;top:-20px;text-align:center;font-family:var(--mono);font-weight:700;font-size:12px;color:var(--viz-ink)}
+.col .seg{border-radius:4px 4px 0 0;transition:filter .15s;cursor:default}
+.col .seg:hover{filter:brightness(1.08)}
+.col .xlab{position:absolute;left:0;right:0;bottom:2px;text-align:center;font-family:var(--mono);font-size:11px;color:var(--viz-ink-2)}
+@media (max-width:600px){.bars{grid-template-columns:auto minmax(0,1fr)}.col{height:190px}.col .stack{flex-basis:164px;height:164px}}
+
+/* ---------- 4-layer stack diagram ---------- */
+.stack{display:grid;gap:10px;margin-top:8px}
+.layer{display:grid;grid-template-columns:64px minmax(0,1fr) minmax(0,1.25fr);gap:16px;align-items:center;padding:14px 16px;border-radius:14px;border:1px solid var(--line);background:var(--panel);transition:.18s}
+.layer:hover{border-color:#ded7c9;box-shadow:0 10px 26px -20px rgba(20,20,19,.25)}
+.layer .tagv{font-family:var(--mono);font-size:11px;font-weight:700;color:#fff;padding:5px 8px;border-radius:7px;text-align:center}
+.layer h4{margin:0;font-size:14.5px}
+.layer .src{margin:2px 0 0;font-size:12.5px;color:var(--muted)}
+.layer .out{font-family:var(--mono);font-size:11.5px;color:var(--viz-ink-2);background:var(--viz-band);border-radius:9px;padding:8px 10px;word-break:break-all}
+@media (max-width:900px){.layer{grid-template-columns:1fr;gap:8px}}
+
+/* ---------- IP / connection-type decision ---------- */
+.decide{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:18px}
+.decide .dc{position:relative;padding:16px;border-radius:14px;border:1px solid var(--line);background:var(--panel);overflow:hidden}
+.decide .dc .barline{height:6px;border-radius:3px;margin-bottom:12px}
+.decide .dc h4{font-size:14.5px}
+.decide .dc p{margin:0;font-size:12.5px;color:var(--muted)}
+.decide .dc .head{display:flex;align-items:baseline;gap:10px;margin:0 0 4px}
+.decide .dc .head h4{margin:0;flex:1;min-width:0}
+.decide .dc .pct{font-family:var(--mono);font-size:10.5px;font-weight:700;letter-spacing:.02em;opacity:.9;white-space:nowrap;flex:0 0 auto}
+.decide .pipe{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px;font-size:12.5px;color:var(--muted)}
+.decide .pipe b{font-family:var(--mono);color:var(--viz-ink-2);background:var(--viz-band);padding:3px 8px;border-radius:6px}
+@media (max-width:900px){.decide{grid-template-columns:1fr}}
+
+/* ---------- quickstart step rail ---------- */
+.rail{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin:6px 0 26px}
+.rail .r{position:relative;padding:16px 16px 16px 18px;border:1px solid var(--line);border-radius:14px;background:var(--panel);overflow:hidden}
+.rail .r .n{position:absolute;right:10px;top:2px;font-size:26px;font-weight:800;color:var(--brand-soft);line-height:1;pointer-events:none}
+.rail .r h4{margin:0 0 5px;font-size:14.5px;position:relative}
+.rail .r p{margin:0;font-size:12.5px;color:var(--muted);position:relative}
+.rail .r .done{display:inline-flex;align-items:center;gap:5px;margin-top:10px;font-size:11.5px;font-weight:700;color:var(--green)}
+@media (max-width:900px){.rail{grid-template-columns:1fr}}
+
+/* ---------- scroll reveal ---------- */
+.rv{opacity:0;transform:translateY(14px);transition:opacity .55s ease,transform .55s cubic-bezier(.2,.8,.2,1)}
+.rv.in{opacity:1;transform:none}
+@media (prefers-reduced-motion:reduce){.rv{opacity:1;transform:none}}
+
+/* ---------- pulse-on-enter ---------- */
+.ping{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--s3);position:relative}
+.ping::after{content:"";position:absolute;inset:0;border-radius:50%;background:var(--s3);animation:ping 2.2s ease-out infinite}
+@keyframes ping{0%{transform:scale(1);opacity:.75}100%{transform:scale(3.2);opacity:0}}
+@media (prefers-reduced-motion:reduce){.ping::after{animation:none}}
+</style>
 </head>
-<body>
+<body class="viz-root">
 
 <nav>
   <div class="wrap">
@@ -219,8 +395,8 @@ footer{border-top:1px solid var(--line);padding:40px 0 56px;background:var(--bg-
     </div>
 
     <div class="codecard" aria-label="响应示例">
-      <div class="bar"><i></i><i></i><i></i></div>
-<pre><span class="c">$ curl -sk https://your-host:23232/echo | jq</span>
+      <div class="bar"><i></i><i></i><i></i><span class="fname">真实响应 · 自动切换 3 个客户端</span></div>
+<pre id="heroOut"><span class="c">$ curl -sk https://your-host:23232/echo | jq</span>
 {
   <span class="k">"client"</span>: {
     <span class="k">"name"</span>: <span class="s">"curl"</span>,
@@ -299,12 +475,68 @@ footer{border-top:1px solid var(--line);padding:40px 0 56px;background:var(--bg-
   <div class="wrap">
     <span class="eyebrow">How it works</span>
     <h2>四层信号，一条链路算完</h2>
-    <p class="sub">服务端在握手与首帧阶段就完成采样，随后与指纹库、数据源链与本地规则融合，最后只返回一个可直接判读的结论。</p>
-    <div class="steps">
-      <div class="step"><span class="num">01</span><h4>TLS 握手</h4><p>在 crypto/tls 消费之前 tee 原始字节，捕获完整 ClientHello。</p></div>
-      <div class="step"><span class="num">02</span><h4>HTTP/2 首帧</h4><p>解析 SETTINGS / PRIORITY / HEADERS，逐连接 HPACK 解码伪首部顺序。</p></div>
-      <div class="step"><span class="num">03</span><h4>身份融合</h4><p>JA4 指纹库 + User-Agent 交叉验证，输出客户端、置信度与伪造标记。</p></div>
-      <div class="step"><span class="num">04</span><h4>来源情报</h4><p>按优先级查询 IP 链，给出地理、ASN 与 datacenter / 住宅代理判定。</p></div>
+    <p class="sub">服务端在握手与首帧阶段就完成采样，随后与指纹库、数据源链与本地规则融合，最后只返回一个可直接判读的结论。下面这段握手是一次真实请求的时序，四层采样各占一个阶段。</p>
+
+    <div class="hs" id="handshake">
+      <div class="hs-head">
+        <h3>一次请求的采样时序</h3>
+        <div class="legend">
+          <span><i style="background:var(--brand)"></i>ClientHello 字节</span>
+          <span><i style="background:var(--s2)"></i>HTTP/2 首帧</span>
+          <span><i style="background:var(--s3)"></i>/echo 响应</span>
+        </div>
+      </div>
+      <div class="hs-body">
+        <div class="hs-wrap">
+          <div class="hs-actors">
+            <div><b>客户端</b><span>curl / browser / 指纹浏览器</span></div>
+            <div><b>echo-server</b><span>单进程 · 单连接</span></div>
+          </div>
+          <div class="hs-track">
+            <div class="hs-stage s1" data-s="1">
+              <span class="orow"><i></i>①</span>
+              <div class="hst"><b>ClientHello（tee 原始字节）</b><span>SNI · ALPN · cipher_suites · extensions</span></div>
+              <span class="flow" aria-hidden="true"></span>
+            </div>
+            <div class="hs-stage s2" data-s="2">
+              <span class="orow back"><i></i>②</span>
+              <div class="hst"><b>ServerHello + Certificate</b><span>服务端返回自签证书，握手完成</span></div>
+              <span class="flow back" aria-hidden="true"></span>
+            </div>
+            <div class="hs-stage s3" data-s="3">
+              <span class="orow"><i></i>③</span>
+              <div class="hst"><b>HTTP/2 HEADERS + SETTINGS</b><span>SETTINGS | PRIORITY | PSEUDO 顺序</span></div>
+              <span class="flow" aria-hidden="true"></span>
+            </div>
+            <div class="hs-stage s4" data-s="4">
+              <span class="orow back"><i></i>④</span>
+              <div class="hst"><b>/echo 响应（JSON）</b><span>JA3 · JA4 · client · http2 · ip</span></div>
+              <span class="flow back" aria-hidden="true"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="hs-foot">
+        <span class="stage" id="hsStage">按下播放，看四层信号各自取样在哪一步</span>
+        <div class="progress"><i id="hsBar"></i></div>
+        <button id="hsPlay" aria-pressed="false">播放</button>
+        <button id="hsStep">下一步</button>
+      </div>
+    </div>
+
+    <div class="stack" style="margin-top:22px">
+      <div class="layer"><span class="tagv" style="background:#d97757">L1 TLS</span>
+        <div><h4>TLS 握手：ClientHello 全量捕获</h4><p class="src">在 <span class="mono">crypto/tls</span> 消费字节之前 tee 一份，跨 TCP 分片与多 record 拼接。</p></div>
+        <div class="out">ja4: t13i3111h2_e8f1e7e78f70_b26ce05bbdd6</div></div>
+      <div class="layer"><span class="tagv" style="background:#eb6834">L2 H2</span>
+        <div><h4>HTTP/2 首帧：SETTINGS / PRIORITY / 伪首部</h4><p class="src">自己接管协商后的 h2 连接，逐帧 HPACK 解码，记录伪首部顺序。</p></div>
+        <div class="out">raw: 3:100,4:10485760,2:0|:method,:scheme,:authority,:path</div></div>
+      <div class="layer"><span class="tagv" style="background:#1baf7a">L3 身份</span>
+        <div><h4>身份融合：JA4 指纹库 × User-Agent</h4><p class="src">指纹库 + UA 交叉验证，输出名称、家族、置信度；不一致即标 UA 伪造。</p></div>
+        <div class="out">client: curl 8.5.0 · conf 0.95 · source user_agent</div></div>
+      <div class="layer"><span class="tagv" style="background:#2a78d6">L4 IP</span>
+        <div><h4>来源情报：地理 / ASN / 连接类型</h4><p class="src">按优先级查询数据源链；本地 CIDR 表兜底，配置 Token 后更强。</p></div>
+        <div class="out">ip: datacenter · AS15169 · 127.0.0.1</div></div>
     </div>
 
     <div class="grid g2" style="margin-top:28px">
@@ -334,6 +566,52 @@ footer{border-top:1px solid var(--line);padding:40px 0 56px;background:var(--bg-
         <p style="margin-top:12px">依据：本地 CIDR 表 + 组织名关键词 + 上游权威标签（配置 Token 后更强）。</p>
       </div>
     </div>
+
+    <div class="demo rv" style="margin-top:28px">
+      <div class="pick">
+        <h3>切换调用方，看服务端怎么认出它</h3>
+        <p>下面三组都是真实响应，来自两类客户端。点一个，右侧给出服务端判读的结论与依据。</p>
+        <button class="choice" role="radio" aria-checked="true" data-k="curl">
+          <span class="dot" style="background:var(--s3)"></span>
+          <span><span class="nm">curl 8.5.0</span><br><span class="meta">CLI · OpenSSL</span></span>
+          <span class="meta">conf 0.95</span>
+        </button>
+        <button class="choice" role="radio" aria-checked="false" data-k="chrome">
+          <span class="dot" style="background:var(--s1)"></span>
+          <span><span class="nm">Chromium 148</span><br><span class="meta">浏览器 · BoringSSL</span></span>
+          <span class="meta">conf 0.90</span>
+        </button>
+        <button class="choice" role="radio" aria-checked="false" data-k="spoof">
+          <span class="dot" style="background:var(--s2)"></span>
+          <span><span class="nm">curl 冒充 Chrome</span><br><span class="meta">UA 说谎 · TLS 说真话</span></span>
+          <span class="meta">conf 0.62</span>
+        </button>
+        <p style="margin-top:6px;font-size:11.5px">数据取自 <span class="mono">/echo</span> 实时响应；TLS 指纹由服务端实测，UA 由客户端自报。</p>
+      </div>
+      <div class="out">
+        <div class="verdict" id="verdict"></div>
+        <div class="fprows" id="fprows"></div>
+        <div style="font-size:11.5px;color:var(--muted)">条形长度表示该客户端握手时各集合的相对大小（条尾数字为真实计数）。</div>
+      </div>
+    </div>
+
+    <div class="rv" style="margin-top:34px">
+      <h3 style="font-size:16px;margin-bottom:4px">连接类型是怎么判出来的</h3>
+      <p class="sub" style="margin-bottom:14px">本地 CIDR 表与上游标签各有盲区，所以服务端把它们并联，任何一条命中就提高置信度。</p>
+      <div class="decide">
+        <div class="dc"><div class="barline" style="background:var(--s1)"></div>
+          <div class="head"><h4>机房 / 云厂商</h4><span class="pct" style="color:var(--s1)">ASN + Org</span></div><p>命中已知云厂商 ASN，或组织名含 <span class="mono">cloud / hosting / CDN</span> 关键词。<br><span class="mono">→ datacenter</span></p></div>
+        <div class="dc"><div class="barline" style="background:var(--s2)"></div>
+          <div class="head"><h4>住宅代理出口</h4><span class="pct" style="color:var(--s2)">CIDR + Tag</span></div><p>IP 落在已知住宅代理网段，或上游给出代理/匿名标签。<br><span class="mono">→ residential_proxy</span></p></div>
+        <div class="dc"><div class="barline" style="background:var(--s3)"></div>
+          <div class="head"><h4>证据不足</h4><span class="pct" style="color:var(--s3)">无证据</span></div><p>两条链都没有命中，只表示「没查到」，<b>不等于干净</b>。<br><span class="mono">→ unknown</span></p></div>
+      </div>
+      <div class="decide" style="margin-top:12px"><div class="dc" style="grid-column:1/-1">
+          <div class="pipe">判定链路： <b>本地 CIDR 表</b> → <b>组织名关键词</b> → <b>上游权威标签</b> → <span style="color:var(--viz-ink-2)">合并 → connection_type</span></div>
+          <p style="margin:0;font-size:12.5px;color:var(--muted)">配置 ipinfo 之类 Token 后上游标签更权威；未配置时本地表兜底，命中率取决于表覆盖范围——控制台「数据源」页可自行追加。</p>
+        </div>
+      </div>
+    </div>
   </div>
 </section>
 
@@ -342,15 +620,26 @@ footer{border-top:1px solid var(--line);padding:40px 0 56px;background:var(--bg-
     <span class="eyebrow">Performance</span>
     <h2>单机 10 万并发连接，零失败</h2>
     <p class="sub">Lite 模式关掉数据库与控制台后，/ip 变成接近内核转发成本的一行响应。下列数字可用仓库内的压测工具复现。</p>
-    <div class="table-wrap"><table class="table">
-      <thead><tr><th>模式</th><th>并发</th><th style="text-align:right">吞吐</th><th style="text-align:right">失败</th><th style="text-align:right">CPU</th></tr></thead>
-      <tbody>
-        <tr><td>lite /ip</td><td class="mono">1,000</td><td class="n">217k rps</td><td class="n good">0</td><td class="n">~2 核</td></tr>
-        <tr><td>lite /ip</td><td class="mono">10,000</td><td class="n">298k rps</td><td class="n good">0</td><td class="n">~2 核</td></tr>
-        <tr><td>lite /ip</td><td class="mono">50,000</td><td class="n">221k rps</td><td class="n good">0</td><td class="n">~2 核</td></tr>
-        <tr><td><b>lite /ip</b></td><td class="mono"><b>100,000</b></td><td class="n"><b>230k–256k rps</b></td><td class="n good"><b>0</b></td><td class="n"><b>~2 核</b></td></tr>
-      </tbody>
-    </table></div>
+    <div class="chart rv" id="tputChart">
+      <h3>吞吐随并发先升后平（lite /ip）</h3>
+      <p class="cap">纵轴 rps（千次/秒），横轴并发连接数。悬停看精确值；右列为失败数与 CPU。</p>
+      <div class="bars" id="tputBars" role="img" aria-label="lite 模式 /ip 吞吐随并发变化：1000 并发 217k rps，10000 并发 298k rps，50000 并发 221k rps，100000 并发 230–256k rps">
+        <div class="yaxis" aria-hidden="true"><span>300k</span><span>200k</span><span>100k</span><span>0</span></div>
+        <div class="plot" id="tputPlot"></div>
+      </div>
+      <div class="tip" id="tputTip"></div>
+      <div class="table-wrap" style="margin-top:16px">
+        <table class="table">
+          <thead><tr><th>模式</th><th>并发</th><th style="text-align:right">吞吐</th><th style="text-align:right">失败</th><th style="text-align:right">CPU</th></tr></thead>
+          <tbody>
+            <tr><td>lite /ip</td><td class="mono">1,000</td><td class="n">217k rps</td><td class="n good">0</td><td class="n">~2 核</td></tr>
+            <tr><td>lite /ip</td><td class="mono">10,000</td><td class="n">298k rps</td><td class="n good">0</td><td class="n">~2 核</td></tr>
+            <tr><td>lite /ip</td><td class="mono">50,000</td><td class="n">221k rps</td><td class="n good">0</td><td class="n">~2 核</td></tr>
+            <tr><td><b>lite /ip</b></td><td class="mono"><b>100,000</b></td><td class="n"><b>230k–256k rps</b></td><td class="n good"><b>0</b></td><td class="n"><b>~2 核</b></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
     <p style="color:var(--muted);font-size:13.5px;margin-top:14px">10 万并发长连接占用 713 MB RSS（约 7.1 KB/连接）；压测机自身需要 13+ 核，瓶颈在客户端而非服务端。</p>
   </div>
 </section>
@@ -364,6 +653,12 @@ footer{border-top:1px solid var(--line);padding:40px 0 56px;background:var(--bg-
       可直接匿名拉取，无需登录；自带控制台、CA 根证书与 <code class="mono">HEALTHCHECK</code>。
       不想用容器就下载单文件二进制。下面默认控制台在 <code class="mono">:23231</code>、HTTPS 指纹端口在 <code class="mono">:23232</code>。
     </p>
+    <div class="rail rv">
+      <div class="r"><span class="n">1</span><h4>拉取并启动</h4><p>一条 <span class="mono">docker run</span>，镜像匿名可拉，无需登录。</p><span class="done">✓ 大约 10 秒</span></div>
+      <div class="r"><span class="n">2</span><h4>验收</h4><p><span class="mono">/health</span> 返回 ok、<span class="mono">/echo</span> 回显指纹、健康状态变 healthy。</p><span class="done">✓ 4 条命令</span></div>
+      <div class="r"><span class="n">3</span><h4>打开控制台</h4><p>浏览器访问 <span class="mono">/ui/</span>，首访可直接初始化管理员。</p><span class="done">✓ 无需额外进程</span></div>
+    </div>
+
     <div class="qs">
       <div class="codecard">
         <div class="bar"><i></i><i></i><i></i><span class="fname">docker run</span></div>
@@ -398,12 +693,10 @@ http://127.0.0.1:23231/ui/</pre>
       <div class="codecard" style="grid-column:1/-1">
         <div class="bar"><i></i><i></i><i></i><span class="fname">variants</span></div>
 <pre><span class="c"># 只保留 HTTPS：控制台与 API 走 23232（自签证书）</span>
-<span class="c"># 1.0.3 镜像的探针固定探测 23231，这里覆盖成 HTTPS；</span>
-<span class="c"># 下个版本起内置探针会自适应，可去掉 --health-cmd。</span>
+<span class="c"># 镜像自带探针会读取 HTTP_PORT，这种布局下依然 healthy，无需覆盖。</span>
 docker run -d --name echo-server -p 23232:23232 \
   -v echo-data:/data -e HTTP_PORT=0 \
   -e ECHO_SERVER_ADMIN_PASSWORD=<span class="s">'换成你的密码'</span> \
-  --health-cmd <span class="s">'wget --no-check-certificate -qO- https://127.0.0.1:23232/health || exit 1'</span> \
   ghcr.io/crawler-requests/echo-server:latest
 
 <span class="c"># Lite：无数据库、无控制台</span>
@@ -434,7 +727,7 @@ docker compose pull &amp;&amp; docker compose up -d</pre>
     </div>
 
     <ul class="qs-notes">
-      <li>镜像 tag 去掉 <code class="mono">v</code> 前缀：发布 <code class="mono">v1.0.3</code> 得到 <code class="mono">1.0.3</code>、<code class="mono">1.0</code>、<code class="mono">1</code> 与 <code class="mono">latest</code>；预发布只发布自身版本号，<code class="mono">latest</code> 停留在上一个正式版。</li>
+      <li>镜像 tag 去掉 <code class="mono">v</code> 前缀：发布 <code class="mono">v1.0.4</code> 得到 <code class="mono">1.0.4</code>、<code class="mono">1.0</code>、<code class="mono">1</code> 与 <code class="mono">latest</code>；预发布只发布自身版本号，<code class="mono">latest</code> 停留在上一个正式版。</li>
       <li>容器以非特权用户 <code class="mono">10001:10001</code> 运行。命名卷（<code class="mono">-v echo-data:/data</code>）会自动获得正确属主；改为绑定宿主机目录时，先 <code class="mono">sudo mkdir -p /srv/echo-data &amp;&amp; sudo chown 10001:10001 /srv/echo-data</code>，再挂载 <code class="mono">-v /srv/echo-data:/data</code>。</li>
       <li>Podman 同样可用：把命令里的 <code class="mono">docker</code> 换成 <code class="mono">podman</code>，参数不变。</li>
       <li>不设置 <code class="mono">ECHO_SERVER_ADMIN_*</code> 时，打开 <code class="mono">/ui/</code> 会走首次初始化向导创建管理员；<b>第一个创建成功的人拥有整个安装</b>，公网部署请务必先通过环境变量设好密码。</li>
@@ -446,7 +739,7 @@ docker compose pull &amp;&amp; docker compose up -d</pre>
     <div class="qs">
       <div class="codecard">
         <div class="bar"><i></i><i></i><i></i><span class="fname">binary</span></div>
-<pre><span class="c"># 1. 下载并校验（以 Linux amd64、&lt;ver&gt;=1.0.3 为例）</span>
+<pre><span class="c"># 1. 下载并校验（以 Linux amd64、&lt;ver&gt;=1.0.4 为例）</span>
 BASE=https://github.com/crawler-requests/echo-server
 D=$BASE/releases/latest/download
 curl -LO $D/checksums.txt
@@ -491,7 +784,7 @@ ECHO_SERVER_LITE=1 PORT=23232 HTTP_PORT=23231 ./echo-server</pre>
     <p class="sub">部署与判读中最常被问到的几件事。</p>
     <div class="faq">
       <details class="q"><summary>为什么 HTTPS 端口要用自签证书？<span class="chev">›</span></summary>
-        <div class="a">回显服务要抓到 TLS ClientHello 与 JA4，就必须自己终结 TLS；用自签证书可以开箱即用。生产环境建议换成正式证书或放在反向代理后面，并把明文控制台端口 <code>HTTP_PORT</code> 关掉或仅绑内网（关闭明文端口时的探针覆盖见快速开始的 HTTPS-only 示例）。</div>
+        <div class="a">回显服务要抓到 TLS ClientHello 与 JA4，就必须自己终结 TLS；用自签证书可以开箱即用。生产环境建议换成正式证书或放在反向代理后面，并把明文控制台端口 <code>HTTP_PORT</code> 关掉或仅绑内网（关闭明文端口时，镜像内置探针会自适应，容器仍是 healthy）。</div>
       </details>
       <details class="q"><summary>JA4 说我是 Chrome，但我其实是 curl，会怎样？<span class="chev">›</span></summary>
         <div class="a">这正是「UA 伪造」检测的场景：响应里 <code>client.spoofed=true</code>，并说明 TLS 指纹指向哪个客户端。用它来验证你的指纹浏览器 / curl-impersonate 是否真的伪装成功。</div>
@@ -530,6 +823,230 @@ ECHO_SERVER_LITE=1 PORT=23232 HTTP_PORT=23231 ./echo-server</pre>
     </div>
   </div>
 </footer>
+
+<script>
+/* ---- 真实响应，取自一台运行中的实例（/echo）--------------------------- */
+const FP = {
+  curl: {
+    name:"curl 8.5.0", family:"cli", conf:0.95, spoofed:false,
+    ja4:"t13i3111h2_e8f1e7e78f70_b26ce05bbdd6",
+    ja3:"771,4866-4867-4865-…,11-10-16-…", ciphers:31, exts:11,
+    h2:"3:100,4:10485760,2:0|:method,:scheme,:authority,:path",
+    note:"TLS 指纹与 User-Agent 一致，判定为 OpenSSL 系 CLI。"
+  },
+  chrome: {
+    name:"Chromium 148", family:"browser", conf:0.90, spoofed:false,
+    ja4:"t13i1515h2_8daaf6152771_d8a2da3f94cd",
+    ja3:"771,51914-4865-4866-…,19018-16-51-…", ciphers:16, exts:17,
+    h2:"SETTINGS 顺序与 curl 不同（浏览器先声明 ALPN 与扩展）",
+    note:"BoringSSL 握手 + 浏览器 UA，两者吻合。"
+  },
+  spoof: {
+    name:"OpenSSL HTTP client", family:"http_client", conf:0.62, spoofed:true,
+    ja4:"t13i3111h1_e8f1e7e78f70_b26ce05bbdd6",
+    ja3:"771,4866-4867-4865-…,11-10-16-…", ciphers:31, exts:11,
+    h2:"与 curl 同族的握手；UA 却声称 Chrome 148",
+    note:"TLS 指纹指向 OpenSSL HTTP client，UA 声称 Chrome —— UA 极可能伪造。"
+  }
+};
+const MAXC = 31, MAXE = 17;
+
+/* 1) hero 响应卡：每 4.5 秒轮换一次真实响应 ------------------------------ */
+const heroOut = document.getElementById("heroOut");
+if (heroOut) {
+  const keys = ["curl","chrome"];
+  let i = 0;
+  const json = (k) => {
+    const c = FP[k];
+    return `<span class="c">$ curl -sk https://your-host:23232/echo | jq  # ${k}</span>
+{
+  <span class="k">"client"</span>: {
+    <span class="k">"name"</span>: <span class="s">"${c.name}"</span>,
+    <span class="k">"family"</span>: <span class="s">"${c.family}"</span>,
+    <span class="k">"confidence"</span>: <span class="n">${c.conf}</span>,
+    <span class="k">"source"</span>: <span class="s">"${c.spoofed ? "ja4_measured" : "user_agent"}"</span>${c.spoofed ? `,
+    <span class="k">"spoofed"</span>: <span class="n">true</span>` : ""}
+  },
+  <span class="k">"client_hello"</span>: {
+    <span class="k">"ja4"</span>: <span class="s">"${c.ja4}"</span>
+  },
+  <span class="k">"http2"</span>: {
+    <span class="k">"raw"</span>: <span class="s">"${k === "chrome" ? "4:16777216,5:16384,2:0|…" : "3:100,4:10485760,2:0|…"}"</span>
+  },
+  <span class="k">"ip"</span>: {
+    <span class="k">"connection_type"</span>: <span class="s">"${k === "chrome" ? "unknown" : "datacenter"}"</span>
+  }
+}`;
+  };
+  const paint = () => {
+    heroOut.style.transition = "opacity .25s";
+    heroOut.style.opacity = 0;
+    setTimeout(() => { heroOut.innerHTML = json(keys[i]); heroOut.style.opacity = 1; }, 200);
+    i = (i + 1) % keys.length;
+  };
+  heroOut.innerHTML = json(keys[0]);
+  i = 1;
+  const still = matchMedia("(prefers-reduced-motion:reduce)").matches;
+  if (!still) setInterval(paint, 4500);
+}
+
+/* 2) 动画握手：分阶段点亮四层采样 ---------------------------------------- */
+(function(){
+  const root = document.getElementById("handshake");
+  if (!root) return;
+  const stages = [...root.querySelectorAll(".hs-stage")];
+  const stage = root.querySelector("#hsStage");
+  const bar = root.querySelector("#hsBar");
+  const playBtn = root.querySelector("#hsPlay");
+  const stepBtn = root.querySelector("#hsStep");
+  const labels = [
+    "① ClientHello 到达：TLS 层唯一一次采样机会",
+    "② 握手完成，连接建立；HTTP/2 协商结果确定",
+    "③ 首帧 SETTINGS/HEADERS：HTTP/2 指纹在这里定型",
+    "④ 响应返回：四层信号合并成一份 JSON"
+  ];
+  const still = matchMedia("(prefers-reduced-motion:reduce)").matches;
+  let timer = null, step = 0;
+
+  function reset(){
+    stages.forEach(st => st.classList.remove("on"));
+    bar.style.width = "0%";
+    stage.textContent = "按下播放，看四层信号各自取样在哪一步";
+    step = 0;
+  }
+  function advance(){
+    if (step >= stages.length) { stop(); return; }
+    stages[step].classList.add("on");
+    bar.style.width = ((step + 1) / stages.length * 100) + "%";
+    stage.textContent = labels[step];
+    step++;
+  }
+  function stop(){
+    if (timer) { clearInterval(timer); timer = null; }
+    playBtn.setAttribute("aria-pressed","false");
+    playBtn.textContent = "播放";
+  }
+  function play(){
+    reset();
+    playBtn.setAttribute("aria-pressed","true");
+    playBtn.textContent = "暂停";
+    advance();
+    timer = setInterval(advance, 1200);
+  }
+  playBtn.addEventListener("click", () => { if (timer) stop(); else play(); });
+  stepBtn.addEventListener("click", () => { stop(); advance(); });
+
+  if (!still && "IntersectionObserver" in window) {
+    const io = new IntersectionObserver((es) => {
+      es.forEach(e => { if (e.isIntersecting) { play(); io.disconnect(); } });
+    }, {threshold:.35});
+    io.observe(root);
+  } else { reset(); }
+})();
+
+/* 3) 客户端判读演示 ------------------------------------------------------ */
+(function(){
+  const root = document.querySelector(".demo");
+  if (!root) return;
+  const verdict = root.querySelector("#verdict");
+  const rows = root.querySelector("#fprows");
+  const choices = [...root.querySelectorAll(".choice")];
+
+  function bar(label, val, max, color, shown){
+    const pct = Math.max(4, Math.round(val / max * 100));
+    return `<div class="fprow"><span class="kname">${label}</span>
+      <span class="bar"><i style="background:${color};width:${pct}%"></i><b>${shown}</b></span></div>`;
+  }
+  function render(k){
+    const c = FP[k];
+    verdict.innerHTML = `
+      <span class="badge2 ${c.spoofed ? "bad" : "ok"}">${c.spoofed ? "⚠ UA 伪造" : "✓ 指纹一致"}</span>
+      <h4>${c.name} <span style="font-weight:400;color:var(--muted);font-size:13px">· ${c.family} · 置信度 ${c.conf}</span></h4>
+      <p>${c.note}</p>
+      <div class="why">ja4 ${c.ja4}<br>h2&nbsp; ${c.h2}</div>`;
+    rows.innerHTML =
+      bar("ciphers", c.ciphers, MAXC, "var(--s1)", c.ciphers + " 个") +
+      bar("extensions", c.exts, MAXE, "var(--s2)", c.exts + " 个") +
+      bar("置信度", Math.round(c.conf * 100), 100, "var(--s3)", (c.conf * 100) + "%");
+    choices.forEach(b => b.setAttribute("aria-checked", b.dataset.k === k ? "true" : "false"));
+  }
+  choices.forEach(b => b.addEventListener("click", () => render(b.dataset.k)));
+  render("curl");
+})();
+
+/* 4) 吞吐条形图：HTML 柱，悬停提示 --------------------------------------- */
+(function(){
+  const chart = document.getElementById("tputChart");
+  if (!chart) return;
+  const data = [
+    {label:"1,000", lo:217, hi:217, fail:0, cpu:"~2 核", peak:false},
+    {label:"10,000", lo:298, hi:298, fail:0, cpu:"~2 核", peak:true},
+    {label:"50,000", lo:221, hi:221, fail:0, cpu:"~2 核", peak:false},
+    {label:"100,000", lo:230, hi:256, fail:0, cpu:"~2 核", peak:true}
+  ];
+  const MAX = 320;                       // rps 上限（千）
+  const plot = chart.querySelector("#tputPlot");
+  const tip  = chart.querySelector("#tputTip");
+
+  // Height comes from the stack's measured box, in px. Percentage flex bases
+  // inside a nested flex column proved unreliable across browsers, and a chart
+  // whose bars can collapse is worse than no chart.
+  const stackH = Math.round(plot.querySelector ? 0 : 0);
+  const measure = () => {
+    const probe = plot.querySelector(".col .stack");
+    return probe ? probe.getBoundingClientRect().height : 194;
+  };
+  const draw = () => {
+    const H = measure();
+    plot.querySelectorAll(".col").forEach(col => {
+      const i = +col.dataset.i, d = data[i];
+      const lo = Math.max(4, Math.round(d.lo / MAX * H));
+      const hi = Math.max(lo, Math.round(d.hi / MAX * H));
+      const inner = col.querySelector(".stack inner") || col.querySelector(".stack");
+      const fill = d.hi === d.lo
+        ? `<div class="seg" style="height:${lo}px;background:var(--s1)"></div>`
+        : `<div class="seg" style="height:${hi - lo}px;background:var(--s2);opacity:.32"></div>
+           <div class="seg" style="height:${lo}px;background:var(--s2)"></div>`;
+      inner.innerHTML = fill;
+    });
+  };
+  plot.innerHTML = `<div class="gridlayer" aria-hidden="true"></div>` + data.map((d, i) =>
+    `<div class="col" data-i="${i}">
+       <span class="cap">${d.hi !== d.lo ? d.lo + "–" + d.hi + "k" : d.hi + "k"}</span>
+       <div class="stack"></div>
+       <span class="xlab">${d.label}</span>
+     </div>`).join("");
+  draw();
+  addEventListener("resize", draw);
+
+  const show = (i, ev) => {
+    const d = data[i];
+    tip.innerHTML = `并发 <b>${d.label}</b> · 吞吐 <b>${d.lo}${d.hi !== d.lo ? "–" + d.hi : ""}k rps</b> · 失败 ${d.fail} · CPU ${d.cpu}`;
+    tip.style.opacity = 1;
+    const r = chart.getBoundingClientRect();
+    const x = ev.clientX - r.left, y = ev.clientY - r.top;
+    tip.style.left = Math.min(r.width - tip.offsetWidth - 8, Math.max(8, x - tip.offsetWidth / 2)) + "px";
+    tip.style.top = Math.max(8, y - tip.offsetHeight - 12) + "px";
+  };
+  plot.querySelectorAll(".col").forEach(col => {
+    const i = +col.dataset.i;
+    col.addEventListener("mousemove", e => show(i, e));
+    col.addEventListener("mouseleave", () => { tip.style.opacity = 0; });
+  });
+})();
+
+/* 5) 滚动淡入 ------------------------------------------------------------ */
+(function(){
+  const els = document.querySelectorAll(".rv");
+  if (!("IntersectionObserver" in window) || matchMedia("(prefers-reduced-motion:reduce)").matches) {
+    els.forEach(e => e.classList.add("in")); return;
+  }
+  const io = new IntersectionObserver((es) => es.forEach(e => {
+    if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); }
+  }), {threshold:.12});
+  els.forEach(e => io.observe(e));
+})();
+</script>
 
 </body>
 </html>
