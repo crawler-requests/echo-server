@@ -167,7 +167,8 @@ Set `HTTP_PORT=23231` to move the plain listener, or `HTTP_PORT=0` to disable it
 A multi-arch image (`linux/amd64`, `linux/arm64`) is published to GitHub's registry on every
 release, so deploying is a pull. Tags drop the leading `v`: the release `v1.0.3` publishes the
 image as `1.0.3`, `1.0`, `1` and `latest`. A prerelease tag (`v1.1.0-rc1`) publishes only its own
-version — `latest` keeps pointing at the last stable release until a stable one ships.
+version — `latest` keeps pointing at the last stable release until a stable one ships. Only the
+newest three releases stay in the registry; older tags are deleted after each release.
 
 ```bash
 docker run -d --name echo-server \

@@ -162,6 +162,7 @@ ClientHello/JA3/JA4。可用 `HTTP_PORT=23231` 修改明文端口，或 `HTTP_PO
 每次发布都会把多架构镜像（`linux/amd64`、`linux/arm64`）推到 GitHub 自带的镜像仓库，部署只需拉取。
 镜像 tag 会去掉 `v` 前缀：发布 `v1.0.3` 时镜像为 `1.0.3`、`1.0`、`1` 和 `latest`。预发布 tag
 （如 `v1.1.0-rc1`）只发布它自己的版本号，`latest` 继续指向上一个正式版本，直到正式版发布。
+镜像仓库只保留最近 3 个正式版本，更旧的 tag 会在每次发布后自动清理。
 
 ```bash
 docker run -d --name echo-server \

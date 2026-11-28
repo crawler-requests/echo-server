@@ -62,7 +62,24 @@ is designed so a release is a repeatable 15-minute operation.
      If the pull succeeds without credentials afterwards, it stays that way for all later releases.
      (Org → Settings → Packages → Package Creation → Public makes every future package public and
      removes this manual step from every new project.)
-6. **Post-release**
+     The `retain` job then trims the package to the newest three releases (see below). Nothing to
+     do by hand in step 5 unless the job's log says the prune failed.
+6. **GHCR retention** — after a successful `image` job, `retain` runs `tools/ghcr-prune` with the
+   workflow's own `GITHUB_TOKEN` (`packages: write` already grants list and delete on package
+   versions; verified from a workflow: list 200, delete 204). One multi-arch push creates five
+   package versions (the tagged index manifest, one child per platform, one attestation manifest per
+   platform), so a release is five versions; the tool groups them back into releases and deletes
+   every release older than the newest three, keeping the `1`, `1.2` and `latest` aliases alive.
+   - Dry run any time: `make ghcr-prune GHCR_KEEP=3` (needs `GH_TOKEN` with `read:packages`).
+   - Delete for real: `make ghcr-prune GHCR_KEEP=3 APPLY=1` (needs `write:packages`/`delete:packages`).
+   - The step is `continue-on-error: true`: a prune failure is reported as a warning and never fails
+     a release whose image is already published and verified. The package simply keeps the extra
+     versions until the next successful prune.
+   - GHCR container storage and bandwidth are currently **free** (GitHub's Packages billing docs
+     state container image storage and bandwidth are currently free and that a policy change will be
+     announced at least a month ahead). The window is bounded anyway so the version list stays
+     readable and so the delete step already works if that policy ever changes.
+7. **Post-release**
    - Announce in the project README/discussions if applicable.
    - Bump `serverVersion`'s development default only if the project starts cutting maintenance
      branches (release builds always get the tag value from ldflags).

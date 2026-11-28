@@ -169,12 +169,6 @@ jobs:
       # 1.3.0-rc1 only: `latest`, `1.3` and `1` must keep pointing at the last
       # stable release, or a pre-release silently becomes what an operator's
       # `docker pull …:latest` returns.
-      #
-      # The ci-<sha> tag is enable-gated on workflow_dispatch: `inputs` is empty
-      # on a tag push, and a bare `enable=${{ inputs.build_image }}` then renders
-      # `enable=` — metadata-action fails with "Invalid value for enable attribute"
-      # and a tag release cannot publish its image. Comparing the event name first
-      # keeps the value a boolean in both paths.
       - name: Image metadata
         id: meta
         uses: docker/metadata-action@v6
@@ -185,7 +179,7 @@ jobs:
             type=semver,pattern={{major}}.{{minor}},enable=${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-') }}
             type=semver,pattern={{major}},enable=${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-') }}
             type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-') }}
-            type=raw,value=ci-${{ github.sha }},enable=${{ github.event_name == 'workflow_dispatch' && inputs.build_image || false }}
+            type=raw,value=ci-${{ github.sha }},enable=${{ inputs.build_image }}
 
       - name: Build and push
         id: push
@@ -299,4 +293,82 @@ jobs:
           # would do it.
           docker logout ghcr.io
           docker pull "${REPO}:${TAG}"
+
+  # Each multi-arch push creates five package versions (the tagged index
+  # manifest, one child manifest per platform, one attestation manifest per
+  # platform), so the package grows by five versions per release. Keep the
+  # newest three releases and delete the rest, so the package's version list
+  # stays bounded (and stays far under GitHub's "5,000 downloads per version"
+  # limit that blocks deleting a public package version).
+  #
+  # tools/ghcr-prune groups the five fragments of each push back into one
+  # release before deleting, and never removes the last version carrying a
+  # floating alias (`1`, `1.2`, `latest`). It defaults to a dry run; `-apply`
+  # is passed here because the window is the whole point.
+  #
+  # A separate job because the `image` job has no Go toolchain. Pruning must not
+  # fail a release whose image is already published and verified, so every
+  # failure here is reported through continue-on-error and a warning.
+  #
+  # A manual `build_image` run publishes into the throwaway `<repo>-ci`
+  # package instead, and prunes that one: the test package is throwaway, but a
+  # version every manual run still accumulates five versions a time.
+  retain:
+    name: Keep only the newest releases in GHCR
+    needs: image
+    if: ${{ always() && needs.image.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Which package the image job published: `<repo>` on a tag release,
+      # `<repo>-ci` on a manual run.
+      - name: Resolve package name
+        id: pkg
+        run: |
+          set -euo pipefail
+          repo="${{ github.repository }}"
+          package="${repo#*/}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            package="${package}-ci"
+          fi
+          echo "name=$package" >> "$GITHUB_OUTPUT"
+          echo "owner=${repo%%/*}" >> "$GITHUB_OUTPUT"
+
+      - name: Prune (dry run first)
+        id: prune
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          go run ./tools/ghcr-prune -owner "${{ steps.pkg.outputs.owner }}" \
+            -package "${{ steps.pkg.outputs.name }}" -keep 3 | tee /tmp/prune-dry.txt
+
+      - name: Prune (apply)
+        id: apply
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          go run ./tools/ghcr-prune -owner "${{ steps.pkg.outputs.owner }}" \
+            -package "${{ steps.pkg.outputs.name }}" -keep 3 -apply | tee /tmp/prune-apply.txt
+
+      - name: Report a failed prune without failing the release
+        if: steps.prune.outcome == 'failure' || steps.apply.outcome == 'failure'
+        run: |
+          echo "::warning::GHCR retention did not run; the release itself is unaffected."
+          echo "The package keeps accumulating versions until the next successful prune."
+          exit 0
+
 
