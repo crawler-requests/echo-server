@@ -6,7 +6,20 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-## [1.0.4] - 2026-11-27
+### Added
+
+- **GHCR keeps only the newest three releases.** Every multi-arch push (Buildx with attestations)
+  creates five package versions — the tagged index manifest, one child manifest per platform and one
+  attestation manifest per platform — so the package grows by five versions per release. After a
+  successful publish, `release.yml` runs `tools/ghcr-prune` (`make ghcr-prune` locally, a dry run
+  unless `APPLY=1`) which groups those fragments back into releases and deletes the ones outside the
+  newest three, keeping the `1`, `1.2` and `latest` aliases alive. The step runs with the workflow's
+  own `GITHUB_TOKEN` — verified from a workflow that `packages: write` already grants list (200) and
+  delete (204) on package versions — and never fails a release whose image is already published and
+  verified.
+  GHCR's container storage and bandwidth are currently free (GitHub's Packages billing docs, "free
+  for public packages"), but the retention window keeps the package's version list from growing
+  without bound and keeps the delete step working today if that policy ever changes.
 
 ### Fixed
 
@@ -16,8 +29,8 @@ All notable changes to this project are documented here. The format follows
   uses) the probe dialled a closed port and Docker marked the container unhealthy on every check;
   with `-e HTTP_PORT=8080` it dialled the wrong port. The binary now answers
   `echo-server healthcheck`, which reads the same `PORT`/`HTTP_PORT` environment the server does,
-  tries the always-on HTTPS listener first and falls back to plain HTTP. Verified in all four
-  layouts — defaults, `HTTP_PORT=0`, `HTTP_PORT=8080` and lite mode — each reporting `healthy`.
+  tries the always-on HTTPS listener first and falls back to plain HTTP. Verified for the default
+  ports, `HTTP_PORT=0`, and `HTTP_PORT=8080`, all reporting `healthy`.
 - **Container image tags now match the version the binary reports.** `docker/metadata-action`'s
   `{{version}}` strips the tag's leading `v`, so release `v1.0.3` publishes the image as `1.0.3`
   (not `v1.0.3`), while the Dockerfile was built with `github.ref_name` (`v1.0.3`), leaving
@@ -27,11 +40,6 @@ All notable changes to this project are documented here. The format follows
 - **A prerelease tag no longer overwrites `latest`.** `v1.3.0-rc1` used to publish `1.3`, `1` and
   `latest`, silently redirecting every `docker pull …:latest` from the last stable release to a
   release candidate. A prerelease now publishes only its own version tag.
-- **A tag release could not publish its container image.** The `ci-<sha>` tag entry was gated with
-  `enable=${{ inputs.build_image }}`; `inputs` is empty on a tag push, so the value rendered as an
-  empty string and `docker/metadata-action` failed the job with "Invalid value for enable
-  attribute". The gate now compares the event name first, so a tag release publishes its image
-  exactly as intended.
 
 ### Added
 
@@ -247,8 +255,7 @@ First public release. One self-contained Go binary with the React console embedd
 - **Build & release** — `Makefile`, `//go:embed` single binary, GoReleaser (6 platform targets,
   archives, checksums), GitHub Actions CI and tag-triggered releases, Dockerfile.
 
-[Unreleased]: https://github.com/crawler-requests/echo-server/compare/v1.0.4...HEAD
-[1.0.4]: https://github.com/crawler-requests/echo-server/releases/tag/v1.0.4
+[Unreleased]: https://github.com/crawler-requests/echo-server/compare/v1.0.3...HEAD
 [1.0.3]: https://github.com/crawler-requests/echo-server/releases/tag/v1.0.3
 [0.0.1]: https://github.com/crawler-requests/echo-server/releases/tag/v0.0.1
 [1.0.0]: https://github.com/crawler-requests/echo-server/releases/tag/v1.0.0

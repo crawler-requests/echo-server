@@ -13,7 +13,7 @@ LDFLAGS     := -s -w \
 	-X main.buildCommit=$(COMMIT) \
 	-X main.buildDate=$(BUILD_DATE)
 
-.PHONY: help frontend build build-fast test vet lint snapshot release-snapshot docker docker-smoke clean run loadtest lite
+.PHONY: help frontend build build-fast test vet lint snapshot release-snapshot docker docker-smoke clean run loadtest lite ghcr-prune
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -94,6 +94,10 @@ run: build ## Build and run the server in the foreground
 lite: ## Build the lite binary (no database; /ip and /echo only at runtime)
 	go build -trimpath -ldflags "$(LDFLAGS)" -o $(BINARY)-lite .
 	@echo "run it with: ECHO_SERVER_LITE=1 ./$(BINARY)-lite"
+
+ghcr-prune: ## Dry-run the GHCR retention window (GHCR_KEEP=3, GH_TOKEN=...); add APPLY=1 to delete
+	go run ./tools/ghcr-prune -owner $(or $(GHCR_OWNER),crawler-requests) -package $(BINARY) \
+		-keep $(or $(GHCR_KEEP),3) $(if $(APPLY),-apply)
 
 loadtest: ## High-concurrency load test against a running lite server (CONNS=100000)
 	go run ./tools/loadtest -mode $(or $(MODE),drive) -c $(or $(CONNS),100000) \
