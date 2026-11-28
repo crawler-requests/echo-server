@@ -727,7 +727,7 @@ docker compose pull &amp;&amp; docker compose up -d</pre>
     </div>
 
     <ul class="qs-notes">
-      <li>镜像 tag 去掉 <code class="mono">v</code> 前缀：发布 <code class="mono">v1.0.4</code> 得到 <code class="mono">1.0.4</code>、<code class="mono">1.0</code>、<code class="mono">1</code> 与 <code class="mono">latest</code>；预发布只发布自身版本号，<code class="mono">latest</code> 停留在上一个正式版。</li>
+      <li>镜像 tag 去掉 <code class="mono">v</code> 前缀：发布 <code class="mono">v1.0.4</code> 得到 <code class="mono">1.0.4</code>、<code class="mono">1.0</code>、<code class="mono">1</code> 与 <code class="mono">latest</code>；预发布只发布自身版本号，<code class="mono">latest</code> 停留在上一个正式版；镜像仓库只保留最近 3 个正式版本，更旧的 tag 会自动清理。</li>
       <li>容器以非特权用户 <code class="mono">10001:10001</code> 运行。命名卷（<code class="mono">-v echo-data:/data</code>）会自动获得正确属主；改为绑定宿主机目录时，先 <code class="mono">sudo mkdir -p /srv/echo-data &amp;&amp; sudo chown 10001:10001 /srv/echo-data</code>，再挂载 <code class="mono">-v /srv/echo-data:/data</code>。</li>
       <li>Podman 同样可用：把命令里的 <code class="mono">docker</code> 换成 <code class="mono">podman</code>，参数不变。</li>
       <li>不设置 <code class="mono">ECHO_SERVER_ADMIN_*</code> 时，打开 <code class="mono">/ui/</code> 会走首次初始化向导创建管理员；<b>第一个创建成功的人拥有整个安装</b>，公网部署请务必先通过环境变量设好密码。</li>
